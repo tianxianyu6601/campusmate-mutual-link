@@ -1,0 +1,314 @@
+{
+  "datasets": {
+    "users_050": {
+      "activity_counts": {
+        "algorithms": 2,
+        "badminton": 4,
+        "basketball": 2,
+        "board_games": 2,
+        "course_project": 2,
+        "cycling": 2,
+        "english_cet": 2,
+        "exhibition": 2,
+        "fitness": 2,
+        "general_study": 2,
+        "higher_mathematics": 4,
+        "ielts_toefl": 2,
+        "lecture": 2,
+        "linear_algebra": 2,
+        "movie": 2,
+        "photography": 2,
+        "python": 4,
+        "running": 4,
+        "swimming": 4,
+        "table_tennis": 2
+      },
+      "level_counts": {
+        "advanced": 10,
+        "basic": 14,
+        "intermediate": 10,
+        "novice": 16
+      },
+      "location_counts": {
+        "campus_common_area": 8,
+        "gymnasium": 14,
+        "off_campus_haidian": 5,
+        "online": 11,
+        "pku_library": 12,
+        "sports_field": 14,
+        "teaching_building": 10
+      },
+      "match_type_counts": {
+        "interest": 10,
+        "sport": 20,
+        "study": 20
+      },
+      "most_common_time_slots": [
+        {
+          "count": 14,
+          "time_slot": "fri_19_00"
+        },
+        {
+          "count": 14,
+          "time_slot": "fri_19_30"
+        },
+        {
+          "count": 14,
+          "time_slot": "fri_20_00"
+        },
+        {
+          "count": 12,
+          "time_slot": "mon_19_00"
+        },
+        {
+          "count": 12,
+          "time_slot": "mon_19_30"
+        },
+        {
+          "count": 12,
+          "time_slot": "mon_20_00"
+        },
+        {
+          "count": 12,
+          "time_slot": "tue_19_00"
+        },
+        {
+          "count": 12,
+          "time_slot": "tue_19_30"
+        },
+        {
+          "count": 12,
+          "time_slot": "tue_20_00"
+        },
+        {
+          "count": 12,
+          "time_slot": "wed_19_00"
+        }
+      ],
+      "schema_versions": {
+        "1.0.0": 50
+      },
+      "unique_time_slot_count": 57,
+      "user_count": 50,
+      "validation": {
+        "duplicate_ids": [],
+        "invalid_row_count": 0,
+        "is_valid": true,
+        "row_issues": [],
+        "user_count": 50
+      }
+    },
+    "users_100": {
+      "activity_counts": {
+        "algorithms": 4,
+        "badminton": 6,
+        "basketball": 6,
+        "board_games": 2,
+        "city_walk": 2,
+        "course_project": 4,
+        "cycling": 6,
+        "english_cet": 6,
+        "exhibition": 4,
+        "fitness": 6,
+        "food_exploration": 2,
+        "general_study": 4,
+        "higher_mathematics": 6,
+        "ielts_toefl": 4,
+        "lecture": 2,
+        "linear_algebra": 6,
+        "live_music": 2,
+        "movie": 4,
+        "photography": 2,
+        "python": 6,
+        "running": 6,
+        "swimming": 6,
+        "table_tennis": 4
+      },
+      "level_counts": {
+        "advanced": 24,
+        "basic": 26,
+        "intermediate": 24,
+        "novice": 26
+      },
+      "location_counts": {
+        "campus_common_area": 15,
+        "gymnasium": 27,
+        "off_campus_haidian": 13,
+        "online": 22,
+        "pku_library": 20,
+        "sports_field": 28,
+        "teaching_building": 22
+      },
+      "match_type_counts": {
+        "interest": 20,
+        "sport": 40,
+        "study": 40
+      },
+      "most_common_time_slots": [
+        {
+          "count": 28,
+          "time_slot": "fri_19_00"
+        },
+        {
+          "count": 28,
+          "time_slot": "fri_19_30"
+        },
+        {
+          "count": 28,
+          "time_slot": "fri_20_00"
+        },
+        {
+          "count": 23,
+          "time_slot": "mon_19_00"
+        },
+        {
+          "count": 23,
+          "time_slot": "mon_19_30"
+        },
+        {
+          "count": 23,
+          "time_slot": "mon_20_00"
+        },
+        {
+          "count": 21,
+          "time_slot": "thu_19_00"
+        },
+        {
+          "count": 21,
+          "time_slot": "thu_19_30"
+        },
+        {
+          "count": 21,
+          "time_slot": "thu_20_00"
+        },
+        {
+          "count": 19,
+          "time_slot": "wed_19_00"
+        }
+      ],
+      "schema_versions": {
+        "1.0.0": 100
+      },
+      "unique_time_slot_count": 57,
+      "user_count": 100,
+      "validation": {
+        "duplicate_ids": [],
+        "invalid_row_count": 0,
+        "is_valid": true,
+        "row_issues": [],
+        "user_count": 100
+      }
+    },
+    "users_200": {
+      "activity_counts": {
+        "algorithms": 10,
+        "badminton": 12,
+        "basketball": 10,
+        "board_games": 4,
+        "city_walk": 4,
+        "course_project": 10,
+        "cycling": 12,
+        "english_cet": 10,
+        "exhibition": 6,
+        "fitness": 12,
+        "food_exploration": 4,
+        "general_study": 10,
+        "higher_mathematics": 10,
+        "ielts_toefl": 10,
+        "lecture": 6,
+        "linear_algebra": 10,
+        "live_music": 4,
+        "movie": 6,
+        "photography": 6,
+        "python": 10,
+        "running": 12,
+        "swimming": 12,
+        "table_tennis": 10
+      },
+      "level_counts": {
+        "advanced": 50,
+        "basic": 50,
+        "intermediate": 50,
+        "novice": 50
+      },
+      "location_counts": {
+        "campus_common_area": 28,
+        "gymnasium": 55,
+        "off_campus_haidian": 27,
+        "online": 45,
+        "pku_library": 40,
+        "sports_field": 55,
+        "teaching_building": 42
+      },
+      "match_type_counts": {
+        "interest": 40,
+        "sport": 80,
+        "study": 80
+      },
+      "most_common_time_slots": [
+        {
+          "count": 56,
+          "time_slot": "fri_19_00"
+        },
+        {
+          "count": 56,
+          "time_slot": "fri_19_30"
+        },
+        {
+          "count": 56,
+          "time_slot": "fri_20_00"
+        },
+        {
+          "count": 44,
+          "time_slot": "mon_19_00"
+        },
+        {
+          "count": 44,
+          "time_slot": "mon_19_30"
+        },
+        {
+          "count": 44,
+          "time_slot": "mon_20_00"
+        },
+        {
+          "count": 42,
+          "time_slot": "thu_19_00"
+        },
+        {
+          "count": 42,
+          "time_slot": "thu_19_30"
+        },
+        {
+          "count": 42,
+          "time_slot": "thu_20_00"
+        },
+        {
+          "count": 40,
+          "time_slot": "wed_19_00"
+        }
+      ],
+      "schema_versions": {
+        "1.0.0": 200
+      },
+      "unique_time_slot_count": 57,
+      "user_count": 200,
+      "validation": {
+        "duplicate_ids": [],
+        "invalid_row_count": 0,
+        "is_valid": true,
+        "row_issues": [],
+        "user_count": 200
+      }
+    }
+  },
+  "metadata": {
+    "baseline_alias": "/Users/gabrielmu/Documents/CampusMate/data/users.csv",
+    "schema_version": "1.0.0",
+    "seed": 20260802,
+    "sizes": [
+      50,
+      100,
+      200
+    ]
+  }
+}

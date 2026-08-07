@@ -1,0 +1,5 @@
+# Part 1 uses only the Python standard library. Part 3 adds Streamlit for the
+# local interactive application. st.Page/st.navigation require Streamlit 1.36+
+# and the upper bound prevents an unreviewed major-version upgrade.
+streamlit>=1.36,<2.0
+networkx>=3,<4

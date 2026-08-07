@@ -1,0 +1,393 @@
+"""CampusMate Streamlit application entrypoint.
+
+Run this file from the project root with::
+
+    streamlit run app.py
+
+The entrypoint owns shared page configuration, navigation, and session state.
+Individual pages consume the stable interfaces delivered by Part 1.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import streamlit as st
+
+from services.i18n import CHINESE
+
+
+PROJECT_ROOT = Path(__file__).resolve().parent
+
+DEFAULT_SESSION_STATE: dict[str, Any] = {
+    "selected_match_type": None,
+    "questionnaire_answers": {},
+    "current_profile": None,
+    "matching_run": None,
+    "current_match": None,
+    "feedback_records": [],
+}
+
+
+def _initialise_session_state() -> None:
+    """Create the cross-page state used by the CampusMate workflow."""
+
+    # The application is Chinese-only. Reset an old bilingual session so a
+    # previously selected English value cannot leak into any page.
+    st.session_state["language"] = CHINESE
+    for key, default_value in DEFAULT_SESSION_STATE.items():
+        if key not in st.session_state:
+            st.session_state[key] = default_value.copy() if isinstance(default_value, dict) else default_value
+
+
+def _available_pages() -> list[st.Page]:
+    """Build navigation while allowing later modules to be added incrementally."""
+
+    pages = [
+        st.Page(
+            "pages/home.py",
+            title="首页",
+            icon="🏠",
+            default=True,
+        ),
+        st.Page(
+            "pages/questionnaire.py",
+            title="填写行动卡",
+            icon="📝",
+        ),
+    ]
+
+    optional_pages = (
+        ("pages/matching.py", "开始匹配", "🔎"),
+        ("pages/result.py", "匹配结果", "✨"),
+        ("pages/ai_insights.py", "AI 洞察", "💡"),
+    )
+    for relative_path, title, icon in optional_pages:
+        if (PROJECT_ROOT / relative_path).exists():
+            pages.append(st.Page(relative_path, title=title, icon=icon))
+    return pages
+
+
+st.set_page_config(
+    page_title="CampusMate",
+    page_icon="🤝",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+st.markdown(
+    """
+    <style>
+      :root {
+        --campusmate-navy: #111111;
+        --campusmate-blue: #2f6fed;
+        --campusmate-mint: #2bb7a9;
+        --campusmate-paper: #f6f8fc;
+      }
+      .stApp {
+        background:
+          radial-gradient(circle at 90% 8%, rgba(47, 111, 237, 0.10), transparent 28rem),
+          linear-gradient(180deg, #ffffff 0%, var(--campusmate-paper) 100%);
+      }
+      .block-container {
+        max-width: 1120px;
+        padding-top: 2.2rem;
+        padding-bottom: 4rem;
+      }
+      [data-testid="stDecoration"],
+      .stDeployButton,
+      [data-testid="stAppDeployButton"],
+      #MainMenu {
+        display: none !important;
+      }
+      div[class*="st-key-top_right_settings"] {
+        position: fixed !important;
+        right: 1.25rem !important;
+        top: 0.55rem !important;
+        width: auto !important;
+        z-index: 999990 !important;
+      }
+      div[class*="st-key-top_right_settings"] > div {
+        width: auto !important;
+      }
+      div[class*="st-key-top_right_settings"] button {
+        background: #ffffff !important;
+        border: 1.5px solid #111111 !important;
+        border-radius: 0.7rem !important;
+        box-shadow: 0 2px 9px rgba(17, 17, 17, 0.12) !important;
+        color: #111111 !important;
+        font-weight: 700 !important;
+        min-height: 2.55rem !important;
+        padding: 0.35rem 0.9rem !important;
+      }
+      div[class*="st-key-top_right_settings"] button:hover {
+        background: #f2f5fb !important;
+        border-color: #2f6fed !important;
+      }
+      [data-testid="stSidebarCollapseButton"] button,
+      button[data-testid="stExpandSidebarButton"] {
+        align-items: center !important;
+        background: #111111 !important;
+        border: 2px solid #ffffff !important;
+        border-radius: 999px !important;
+        box-shadow: 0 3px 12px rgba(17, 17, 17, 0.28) !important;
+        display: flex !important;
+        height: 3.1rem !important;
+        justify-content: center !important;
+        min-height: 3.1rem !important;
+        min-width: 3.1rem !important;
+        padding: 0 !important;
+        transition: background 150ms ease, box-shadow 150ms ease, transform 150ms ease !important;
+        width: 3.1rem !important;
+      }
+      [data-testid="stSidebarCollapseButton"] button span,
+      button[data-testid="stExpandSidebarButton"] span,
+      [data-testid="stSidebarCollapseButton"] button svg,
+      button[data-testid="stExpandSidebarButton"] svg {
+        color: #ffffff !important;
+        fill: #ffffff !important;
+        font-size: 2rem !important;
+      }
+      [data-testid="stSidebarCollapseButton"] button:hover,
+      button[data-testid="stExpandSidebarButton"]:hover {
+        background: #2f6fed !important;
+        box-shadow: 0 5px 16px rgba(47, 111, 237, 0.38) !important;
+        transform: scale(1.07);
+      }
+      [data-testid="stSidebarCollapseButton"] button:focus-visible,
+      button[data-testid="stExpandSidebarButton"]:focus-visible {
+        outline: 3px solid rgba(47, 111, 237, 0.42) !important;
+        outline-offset: 2px !important;
+      }
+      [data-testid="stMain"] {
+        color: #111111;
+      }
+      [data-testid="stMain"] h1,
+      [data-testid="stMain"] h2,
+      [data-testid="stMain"] h3,
+      [data-testid="stMain"] h4,
+      [data-testid="stMain"] p,
+      [data-testid="stMain"] label,
+      [data-testid="stMain"] li,
+      [data-testid="stMain"] span:not([data-testid="stIconMaterial"]) {
+        color: #111111 !important;
+      }
+      [data-testid="stMain"] div[data-testid="stCaptionContainer"] p {
+        color: #333333 !important;
+      }
+      [data-testid="stMultiSelect"] [data-baseweb="tag"] {
+        background: #eef4ff !important;
+        border: 1.5px solid #2f6fed !important;
+        border-radius: 0.5rem !important;
+        box-shadow: none !important;
+        color: #17324d !important;
+        min-height: 2rem !important;
+        padding-left: 0.35rem !important;
+      }
+      [data-testid="stMultiSelect"] [data-baseweb="tag"] span,
+      [data-testid="stMultiSelect"] [data-baseweb="tag"] div {
+        color: #17324d !important;
+        font-weight: 600 !important;
+        opacity: 1 !important;
+      }
+      [data-testid="stMultiSelect"] [data-baseweb="tag"] svg {
+        color: #49627d !important;
+        fill: #49627d !important;
+      }
+      [data-testid="stMultiSelect"] [data-baseweb="tag"]:hover {
+        background: #dde9ff !important;
+        border-color: #174ea6 !important;
+      }
+      div[data-testid="stButton"] > button,
+      div[data-testid="stFormSubmitButton"] > button {
+        border-radius: 0.75rem;
+        min-height: 2.8rem;
+        font-weight: 650;
+      }
+      div[data-testid="stFormSubmitButton"] > button {
+        width: 100% !important;
+        min-height: 3.25rem !important;
+        background: #ffffff !important;
+        border: 2px solid #111111 !important;
+        border-radius: 0.35rem !important;
+        color: #111111 !important;
+        box-shadow: none !important;
+      }
+      div[data-testid="stFormSubmitButton"] > button:hover {
+        background: #eef4ff !important;
+        border-color: #276ef1 !important;
+      }
+      div[data-testid="stFormSubmitButton"] > button p,
+      div[data-testid="stFormSubmitButton"] > button span {
+        width: 100% !important;
+        margin: 0 !important;
+        color: #111111 !important;
+        text-align: center !important;
+      }
+      div[data-testid="stMetric"] {
+        background: #ffffff;
+        border: 1.5px solid #111111;
+        border-radius: 0.9rem;
+        padding: 0.9rem 1rem;
+      }
+      div[data-testid="stMetric"] label,
+      div[data-testid="stMetric"] [data-testid="stMetricValue"] {
+        color: #111111 !important;
+      }
+      .campusmate-kicker {
+        color: var(--campusmate-blue);
+        font-size: 0.88rem;
+        font-weight: 750;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      .campusmate-muted {
+        color: #111111 !important;
+      }
+      div[class*="st-key-mate_card_"] {
+        background: #ffffff !important;
+        border: 2px solid #111111 !important;
+        border-radius: 1rem !important;
+        box-shadow: 0 8px 20px rgba(17, 17, 17, 0.07);
+        padding: 0.55rem;
+      }
+      div[class*="st-key-mate_card_"] .mate-card-icon {
+        align-items: center;
+        display: flex;
+        font-size: 3.4rem;
+        justify-content: center;
+        line-height: 1.2;
+        min-height: 7.5rem;
+      }
+      div[class*="st-key-mate_card_"] div[data-testid="stButton"] > button {
+        background: #111111 !important;
+        border: 2px solid #111111 !important;
+        color: #ffffff !important;
+      }
+      div[class*="st-key-mate_card_"] div[data-testid="stButton"] > button p {
+        color: #ffffff !important;
+      }
+      div[class*="st-key-mate_card_"] div[data-testid="stButton"] > button:hover {
+        background: #333333 !important;
+        border-color: #333333 !important;
+      }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+_initialise_session_state()
+
+available_pages = _available_pages()
+navigation = st.navigation(available_pages, position="hidden")
+
+with st.sidebar:
+    st.markdown("## 🤝 CampusMate")
+    st.page_link(
+        "pages/home.py",
+        label="首页",
+        icon="🏠",
+        use_container_width=True,
+    )
+    st.page_link(
+        "pages/questionnaire.py",
+        label="填写行动卡",
+        icon="📝",
+        use_container_width=True,
+    )
+    if (PROJECT_ROOT / "pages" / "matching.py").exists():
+        st.page_link(
+            "pages/matching.py",
+            label="开始匹配",
+            icon="🔎",
+            use_container_width=True,
+        )
+    if (PROJECT_ROOT / "pages" / "result.py").exists():
+        st.page_link(
+            "pages/result.py",
+            label="匹配结果",
+            icon="✨",
+            use_container_width=True,
+        )
+    if (PROJECT_ROOT / "pages" / "ai_insights.py").exists():
+        st.page_link(
+            "pages/ai_insights.py",
+            label="AI 洞察",
+            icon="💡",
+            use_container_width=True,
+        )
+    st.divider()
+    st.markdown("**MutualLink Created**")
+    selected_type = st.session_state.get("selected_match_type")
+    type_icons = {"study": "📚", "sport": "🏃", "interest": "🎨"}
+    type_labels_zh = {
+        "study": "学习搭子",
+        "sport": "运动搭子",
+        "interest": "兴趣活动搭子",
+    }
+    if selected_type in type_labels_zh:
+        selected_label = type_labels_zh[selected_type]
+        st.success(f"当前选择：{type_icons[selected_type]} {selected_label}")
+    else:
+        st.info("请先在首页选择搭子类型")
+
+with st.container(key="top_right_settings"):
+    with st.popover("⚙️ 设置", help="查看应用部署选项"):
+        st.markdown("### 部署应用")
+        st.caption("选择适合项目用途的部署方式。")
+
+        community_tab, snowflake_tab, custom_tab = st.tabs(
+            ["社区云", "Snowflake", "其他平台"]
+        )
+
+        with community_tab:
+            st.markdown("#### Streamlit 社区云")
+            st.write("适合个人项目、课程作业与学习展示，可免费部署公开应用。")
+            st.markdown(
+                "- 连接 GitHub 仓库后快速部署\n"
+                "- 支持公开应用和分享链接\n"
+                "- 可浏览并学习社区中的热门应用"
+            )
+            st.link_button(
+                "立即部署",
+                "https://share.streamlit.io/",
+                use_container_width=True,
+            )
+            st.link_button(
+                "查看部署说明",
+                "https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/deploy",
+                use_container_width=True,
+            )
+
+        with snowflake_tab:
+            st.markdown("#### Snowflake")
+            st.write("适合需要企业级安全、数据集成和托管基础设施的应用。")
+            st.markdown(
+                "- 使用企业级权限与安全管理\n"
+                "- 部署带角色访问控制的私有应用\n"
+                "- 与 Snowflake 数据平台直接集成"
+            )
+            st.link_button(
+                "查看部署指南",
+                "https://docs.snowflake.com/en/developer-guide/streamlit/getting-started/overview",
+                use_container_width=True,
+            )
+
+        with custom_tab:
+            st.markdown("#### 自定义部署")
+            st.write("适合部署到自有硬件、服务器或其他云服务。")
+            st.markdown(
+                "- 自行选择服务器或云平台\n"
+                "- 自主管理身份认证和运行资源\n"
+                "- 自主控制运维方式与成本"
+            )
+            st.link_button(
+                "查看其他部署方式",
+                "https://docs.streamlit.io/deploy/tutorials",
+                use_container_width=True,
+            )
+
+        st.caption("部署操作会在对应平台中完成，不会修改本地问卷数据。")
+
+navigation.run()
