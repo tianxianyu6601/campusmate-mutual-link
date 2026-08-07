@@ -212,6 +212,28 @@ def _resend_config() -> dict[str, str] | None:
     return {"api_key": api_key, "from_email": from_email}
 
 
+def _sendgrid_config() -> dict[str, str] | None:
+    try:
+        config = st.secrets.get("sendgrid", None)
+    except Exception:
+        return None
+    if not config:
+        return None
+    required = ("api_key", "from_email")
+    missing = [key for key in required if not config.get(key)]
+    if missing:
+        raise AuthError(f"SendGrid 配置缺少：{', '.join(missing)}")
+    api_key = str(config["api_key"]).strip()
+    from_email = str(config["from_email"]).strip()
+    from_name = str(config.get("from_name", "CampusMate")).strip() or "CampusMate"
+    if not api_key.startswith("SG."):
+        raise AuthError("SendGrid api_key 应以 SG. 开头，请检查 Secrets。")
+    if "your_" in from_email or "example.com" in from_email or "你的" in from_email:
+        raise AuthError("SendGrid from_email 仍然是示例占位内容。")
+    normalize_email(from_email)
+    return {"api_key": api_key, "from_email": from_email, "from_name": from_name}
+
+
 def _send_email_resend(to_email: str, subject: str, body: str) -> None:
     config = _resend_config()
     if not config:
@@ -245,6 +267,43 @@ def _send_email_resend(to_email: str, subject: str, body: str) -> None:
         raise AuthError(f"Resend 发信失败：{error.reason}") from error
 
 
+def _send_email_sendgrid(to_email: str, subject: str, body: str) -> None:
+    config = _sendgrid_config()
+    if not config:
+        raise AuthError(
+            "mail_provider = sendgrid，但缺少 [sendgrid] api_key/from_email 配置。"
+        )
+    payload = json.dumps(
+        {
+            "personalizations": [
+                {"to": [{"email": normalize_email(to_email)}]},
+            ],
+            "from": {"email": config["from_email"], "name": config["from_name"]},
+            "subject": subject,
+            "content": [{"type": "text/plain", "value": body}],
+        },
+        ensure_ascii=False,
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        "https://api.sendgrid.com/v3/mail/send",
+        data=payload,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {config['api_key']}",
+            "Content-Type": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            if response.status < 200 or response.status >= 300:
+                raise AuthError(f"SendGrid 发信失败：HTTP {response.status}")
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode("utf-8", errors="replace")
+        raise AuthError(f"SendGrid 发信失败：HTTP {error.code} {detail}") from error
+    except urllib.error.URLError as error:
+        raise AuthError(f"SendGrid 发信失败：{error.reason}") from error
+
+
 def _preferred_mail_provider() -> str:
     try:
         configured = st.secrets.get("mail_provider", None)
@@ -252,9 +311,11 @@ def _preferred_mail_provider() -> str:
         configured = None
     if configured:
         provider = str(configured).strip().lower()
-        if provider not in {"smtp", "resend"}:
-            raise AuthError("mail_provider 只能填写 smtp 或 resend。")
+        if provider not in {"smtp", "resend", "sendgrid"}:
+            raise AuthError("mail_provider 只能填写 smtp、resend 或 sendgrid。")
         return provider
+    if _sendgrid_config():
+        return "sendgrid"
     if _resend_config():
         return "resend"
     return "smtp"
@@ -311,7 +372,11 @@ def _send_email_once(
 
 
 def send_email(to_email: str, subject: str, body: str) -> None:
-    if _preferred_mail_provider() == "resend":
+    provider = _preferred_mail_provider()
+    if provider == "sendgrid":
+        _send_email_sendgrid(to_email, subject, body)
+        return
+    if provider == "resend":
         _send_email_resend(to_email, subject, body)
         return
 
@@ -348,6 +413,22 @@ def diagnose_mail_service(to_email: str) -> list[str]:
     report: list[str] = []
     provider = _preferred_mail_provider()
     report.append(f"当前邮件通道：{provider}")
+    if provider == "sendgrid":
+        config = _sendgrid_config()
+        report.append(
+            f"SendGrid from_email：{config['from_email'] if config else '未配置'}"
+        )
+        try:
+            _send_email_sendgrid(
+                normalized,
+                "CampusMate 邮件服务自检",
+                "这是一封 CampusMate 邮件服务自检邮件。",
+            )
+            report.append("SendGrid 自检成功：测试邮件已发送。")
+        except (AuthError, MailNotConfigured) as error:
+            report.append(f"SendGrid 自检失败：{error}")
+        return report
+
     if provider == "resend":
         config = _resend_config()
         report.append(f"Resend from_email：{config['from_email'] if config else '未配置'}")

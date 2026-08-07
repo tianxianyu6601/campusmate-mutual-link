@@ -130,6 +130,58 @@ class AuthTests(unittest.TestCase):
         self.assertEqual("Subject", captured["payload"]["subject"])
         self.assertEqual("Body", captured["payload"]["text"])
 
+    def test_sendgrid_provider_posts_mail_send_request(self) -> None:
+        class FakeResponse:
+            status = 202
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+        captured = {}
+
+        def fake_urlopen(request, timeout):
+            captured["url"] = request.full_url
+            captured["timeout"] = timeout
+            captured["headers"] = dict(request.header_items())
+            captured["payload"] = json.loads(request.data.decode("utf-8"))
+            return FakeResponse()
+
+        with (
+            patch(
+                "services.auth.st.secrets",
+                {
+                    "mail_provider": "sendgrid",
+                    "sendgrid": {
+                        "api_key": "SG.123456789",
+                        "from_email": "sender@example.org",
+                        "from_name": "CampusMate",
+                    },
+                },
+            ),
+            patch("services.auth.urllib.request.urlopen", side_effect=fake_urlopen),
+        ):
+            auth.send_email("receiver@example.com", "Subject", "Body")
+
+        self.assertEqual("https://api.sendgrid.com/v3/mail/send", captured["url"])
+        self.assertEqual(30, captured["timeout"])
+        self.assertEqual("Bearer SG.123456789", captured["headers"]["Authorization"])
+        self.assertEqual(
+            [{"to": [{"email": "receiver@example.com"}]}],
+            captured["payload"]["personalizations"],
+        )
+        self.assertEqual(
+            {"email": "sender@example.org", "name": "CampusMate"},
+            captured["payload"]["from"],
+        )
+        self.assertEqual("Subject", captured["payload"]["subject"])
+        self.assertEqual(
+            [{"type": "text/plain", "value": "Body"}],
+            captured["payload"]["content"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
