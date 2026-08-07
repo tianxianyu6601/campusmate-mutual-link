@@ -11,9 +11,11 @@ from ai.icebreaker import generate_icebreakers
 from ai.text_similarity import bidirectional_text_scores
 from data.data_loader import load_users
 from evaluation.feedback import build_feedback, summarize_feedback
+from services.auth import require_login
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+require_login()
 
 
 def _candidate_label(profile: dict[str, object]) -> str:

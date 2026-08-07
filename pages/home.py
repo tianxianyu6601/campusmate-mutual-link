@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import streamlit as st
 
+from services.auth import require_login
 from services.i18n import CHINESE, MATCH_TYPES_EN, tr
 
 
@@ -46,6 +47,7 @@ def _select_match_type(match_type: str) -> None:
 
 
 language = st.session_state.get("language", CHINESE)
+require_login()
 
 st.title("CampusMate")
 st.markdown(

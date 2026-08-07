@@ -8,10 +8,10 @@ from typing import Any, Mapping, Sequence
 import streamlit as st
 
 from data import vocabulary as vocab
-from data.data_loader import load_users
 from data.schema import ProfileValidationError
 from questionnaire.profile_builder import build_profile
 from questionnaire.questions import get_questions
+from services.auth import require_login, save_profile
 from services.i18n import (
     CHINESE,
     field_label,
@@ -86,6 +86,7 @@ QUESTION_GROUPS = (
 )
 
 language = st.session_state.get("language", CHINESE)
+auth_user = require_login()
 
 
 def _option_labels(question: Mapping[str, Any]) -> dict[Any, str]:
@@ -268,19 +269,8 @@ def _validate_metadata_rules(
     return errors
 
 
-def _next_user_id() -> str:
-    users = load_users(PROJECT_ROOT / "data" / "users.csv")
-    numeric_ids = [int(user["user_id"][1:]) for user in users]
-    next_number = max(numeric_ids, default=0) + 1
-    if next_number > 9999:
-        raise ValueError(
-            tr(
-                language,
-                "匿名用户编号已经达到上限",
-                "The anonymous user ID limit has been reached.",
-            )
-        )
-    return f"U{next_number:04d}"
+def _current_user_id() -> str:
+    return str(auth_user["user_id"])
 
 
 selected_match_type = st.session_state.get("selected_match_type")
@@ -372,7 +362,7 @@ if submitted:
             st.write(f"- {message}")
     else:
         try:
-            profile = build_profile(answers, user_id=_next_user_id())
+            profile = build_profile(answers, user_id=_current_user_id())
         except ProfileValidationError as error:
             st.error(
                 tr(
@@ -414,6 +404,7 @@ if submitted:
         else:
             st.session_state.questionnaire_answers = dict(answers)
             st.session_state.current_profile = profile
+            save_profile(str(auth_user["email"]), profile)
             st.session_state.matching_run = None
             st.session_state.current_match = None
             st.warning(

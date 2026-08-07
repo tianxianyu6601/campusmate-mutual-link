@@ -9,6 +9,12 @@ import streamlit as st
 from ai.icebreaker import generate_icebreakers
 from data import vocabulary as vocab
 from data.data_loader import load_users
+from services.auth import (
+    email_for_user_id,
+    load_registered_profiles,
+    require_login,
+    send_match_notification,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -33,6 +39,7 @@ def _labels(values: list[str], mapping: dict[str, str]) -> str:
 
 st.markdown('<div class="campusmate-kicker">匹配结果</div>', unsafe_allow_html=True)
 st.title("你的推荐搭子")
+require_login()
 
 current_profile = st.session_state.get("current_profile")
 match = st.session_state.get("current_match")
@@ -49,7 +56,7 @@ if not match:
 
 current_id = str(current_profile["user_id"])
 partner_id = _partner_id(match, current_id)
-users = load_users(DATASET)
+users = [*load_users(DATASET), *load_registered_profiles()]
 partner = next((user for user in users if user["user_id"] == partner_id), None)
 
 score_col, partner_col = st.columns([1, 2])
@@ -91,6 +98,23 @@ if partner:
     st.subheader("第一次沟通可以这样开始")
     for index, prompt in enumerate(generate_icebreakers(current_profile, partner), start=1):
         st.info(f"{index}. {prompt}")
+
+st.subheader("匹配通知")
+partner_email = email_for_user_id(partner_id)
+if partner_email:
+    st.caption("这位候选人是注册用户，可以向对方邮箱发送匹配成功通知。")
+    if st.button("向对方发送匹配通知", type="primary"):
+        status = send_match_notification(
+            partner_email,
+            partner_id=current_id,
+            score=float(match["score"]),
+        )
+        if status == "sent":
+            st.success("通知邮件已发送。")
+        else:
+            st.warning("邮件服务尚未配置，已记录这次通知请求。")
+else:
+    st.info("这位候选人来自模拟数据集，没有真实邮箱；注册用户之间匹配时才会显示邮件通知按钮。")
 
 with st.container():
     if st.button("返回匹配列表"):

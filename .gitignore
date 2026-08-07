@@ -5,3 +5,5 @@ __pycache__/
 .coverage
 .venv/
 venv/
+campusmate_app.db
+.streamlit/secrets.toml

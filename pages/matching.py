@@ -7,6 +7,7 @@ from pathlib import Path
 import streamlit as st
 
 from data import vocabulary as vocab
+from services.auth import load_registered_profiles, require_login
 from services.matching_adapter import (
     MatchingAdapterError,
     backend_status,
@@ -31,7 +32,12 @@ def _partner_id(match: dict[str, object], current_user_id: str) -> str:
 
 def _run_current_matching(top_k: int) -> None:
     current_profile = st.session_state.get("current_profile")
-    candidates = load_candidate_pool(DATASET)
+    current_id = str(current_profile["user_id"])
+    candidates = [
+        candidate
+        for candidate in [*load_candidate_pool(DATASET), *load_registered_profiles()]
+        if str(candidate.get("user_id")) != current_id
+    ]
     st.session_state.matching_run = run_matching(
         current_profile,
         candidates,
@@ -47,6 +53,7 @@ def _run_current_matching(top_k: int) -> None:
 st.markdown('<div class="campusmate-kicker">真实匹配流程</div>', unsafe_allow_html=True)
 st.title("开始匹配")
 st.caption("调用第二板块的硬过滤、双向评分和全局匹配算法，结果不再使用演示数据。")
+require_login()
 
 current_profile = st.session_state.get("current_profile")
 if not current_profile:

@@ -21,6 +21,7 @@ from services.i18n import CHINESE
 PROJECT_ROOT = Path(__file__).resolve().parent
 
 DEFAULT_SESSION_STATE: dict[str, Any] = {
+    "auth_user": None,
     "selected_match_type": None,
     "questionnaire_answers": {},
     "current_profile": None,
@@ -45,18 +46,15 @@ def _available_pages() -> list[st.Page]:
     """Build navigation while allowing later modules to be added incrementally."""
 
     pages = [
-        st.Page(
-            "pages/home.py",
-            title="首页",
-            icon="🏠",
-            default=True,
-        ),
-        st.Page(
-            "pages/questionnaire.py",
-            title="填写行动卡",
-            icon="📝",
-        ),
+        st.Page("pages/login.py", title="登录", icon="🔐", default=True),
     ]
+    if st.session_state.get("auth_user"):
+        pages.extend(
+            [
+                st.Page("pages/home.py", title="首页", icon="🏠"),
+                st.Page("pages/questionnaire.py", title="填写行动卡", icon="📝"),
+            ]
+        )
 
     optional_pages = (
         ("pages/matching.py", "开始匹配", "🔎"),
@@ -64,7 +62,7 @@ def _available_pages() -> list[st.Page]:
         ("pages/ai_insights.py", "AI 洞察", "💡"),
     )
     for relative_path, title, icon in optional_pages:
-        if (PROJECT_ROOT / relative_path).exists():
+        if st.session_state.get("auth_user") and (PROJECT_ROOT / relative_path).exists():
             pages.append(st.Page(relative_path, title=title, icon=icon))
     return pages
 
@@ -284,33 +282,49 @@ navigation = st.navigation(available_pages, position="hidden")
 
 with st.sidebar:
     st.markdown("## 🤝 CampusMate")
-    st.page_link(
-        "pages/home.py",
-        label="首页",
-        icon="🏠",
-        use_container_width=True,
-    )
-    st.page_link(
-        "pages/questionnaire.py",
-        label="填写行动卡",
-        icon="📝",
-        use_container_width=True,
-    )
-    if (PROJECT_ROOT / "pages" / "matching.py").exists():
+    if st.session_state.get("auth_user"):
+        user = st.session_state.auth_user
+        st.success(f"已登录：{user['email']}")
+        if st.button("退出登录"):
+            for key, default_value in DEFAULT_SESSION_STATE.items():
+                st.session_state[key] = default_value.copy() if isinstance(default_value, dict) else default_value
+            st.rerun()
+    else:
+        st.page_link(
+            "pages/login.py",
+            label="登录 / 注册",
+            icon="🔐",
+            use_container_width=True,
+        )
+        st.info("请先登录后参与匹配")
+    if st.session_state.get("auth_user"):
+        st.page_link(
+            "pages/home.py",
+            label="首页",
+            icon="🏠",
+            use_container_width=True,
+        )
+        st.page_link(
+            "pages/questionnaire.py",
+            label="填写行动卡",
+            icon="📝",
+            use_container_width=True,
+        )
+    if st.session_state.get("auth_user") and (PROJECT_ROOT / "pages" / "matching.py").exists():
         st.page_link(
             "pages/matching.py",
             label="开始匹配",
             icon="🔎",
             use_container_width=True,
         )
-    if (PROJECT_ROOT / "pages" / "result.py").exists():
+    if st.session_state.get("auth_user") and (PROJECT_ROOT / "pages" / "result.py").exists():
         st.page_link(
             "pages/result.py",
             label="匹配结果",
             icon="✨",
             use_container_width=True,
         )
-    if (PROJECT_ROOT / "pages" / "ai_insights.py").exists():
+    if st.session_state.get("auth_user") and (PROJECT_ROOT / "pages" / "ai_insights.py").exists():
         st.page_link(
             "pages/ai_insights.py",
             label="AI 洞察",
