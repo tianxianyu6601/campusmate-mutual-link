@@ -34,14 +34,9 @@ st.markdown(
           linear-gradient(180deg, #ffffff 0%, #f6f8fc 100%) !important;
       }
       div[class*="st-key-login_shell"] {
-        min-height: 100vh;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 4rem 1.25rem;
+        padding: 9vh 1.25rem 3rem;
       }
       div[class*="st-key-login_card"] {
-        width: min(560px, calc(100vw - 2rem));
         background: rgba(255, 255, 255, 0.94);
         border: 1.5px solid rgba(17, 17, 17, 0.16);
         border-radius: 0.65rem;
@@ -98,7 +93,8 @@ st.markdown(
 )
 
 with st.container(key="login_shell"):
-    with st.container(key="login_card"):
+    left_space, card_column, right_space = st.columns([1, 1.15, 1])
+    with card_column.container(key="login_card"):
         st.title("注册 / 登录")
         st.markdown(
             '<p class="login-welcome">欢迎来到 CampusMate，一起来寻找你的搭子。</p>',
@@ -146,7 +142,8 @@ with st.container(key="login_shell"):
                         debug_code = send_verification_code(register_email)
                         if debug_code:
                             st.warning(
-                                f"邮件服务尚未配置。演示验证码：{debug_code}"
+                                "线上邮件服务尚未配置 SMTP Secrets，暂时无法真实发到邮箱。"
+                                f"课程演示验证码：{debug_code}"
                             )
                         else:
                             st.success("验证码已发送，请检查邮箱和垃圾箱。")
