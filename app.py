@@ -47,14 +47,9 @@ def _available_pages() -> list[st.Page]:
 
     pages = [
         st.Page("pages/login.py", title="登录", icon="🔐", default=True),
+        st.Page("pages/home.py", title="首页", icon="🏠"),
+        st.Page("pages/questionnaire.py", title="填写行动卡", icon="📝"),
     ]
-    if st.session_state.get("auth_user"):
-        pages.extend(
-            [
-                st.Page("pages/home.py", title="首页", icon="🏠"),
-                st.Page("pages/questionnaire.py", title="填写行动卡", icon="📝"),
-            ]
-        )
 
     optional_pages = (
         ("pages/matching.py", "开始匹配", "🔎"),
@@ -62,9 +57,35 @@ def _available_pages() -> list[st.Page]:
         ("pages/ai_insights.py", "AI 洞察", "💡"),
     )
     for relative_path, title, icon in optional_pages:
-        if st.session_state.get("auth_user") and (PROJECT_ROOT / relative_path).exists():
+        if (PROJECT_ROOT / relative_path).exists():
             pages.append(st.Page(relative_path, title=title, icon=icon))
     return pages
+
+
+def _inject_login_shell_css() -> None:
+    """Keep the unauthenticated shell focused on the login card."""
+
+    st.markdown(
+        """
+        <style>
+          [data-testid="stSidebar"],
+          [data-testid="stSidebarCollapseButton"],
+          button[data-testid="stExpandSidebarButton"],
+          header [data-testid="stToolbar"],
+          header [data-testid="stActionButton"] {
+            display: none !important;
+          }
+          .block-container {
+            max-width: 100% !important;
+            padding: 0 !important;
+          }
+          [data-testid="stAppViewContainer"] > .main {
+            padding-left: 0 !important;
+          }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 st.set_page_config(
@@ -280,24 +301,24 @@ _initialise_session_state()
 available_pages = _available_pages()
 navigation = st.navigation(available_pages, position="hidden")
 
-with st.sidebar:
-    st.markdown("## 🤝 CampusMate")
-    if st.session_state.get("auth_user"):
+is_authenticated = bool(st.session_state.get("auth_user"))
+
+if not is_authenticated:
+    _inject_login_shell_css()
+
+if is_authenticated:
+    with st.sidebar:
+        st.markdown("## 🤝 CampusMate")
         user = st.session_state.auth_user
         st.success(f"已登录：{user['email']}")
         if st.button("退出登录"):
             for key, default_value in DEFAULT_SESSION_STATE.items():
-                st.session_state[key] = default_value.copy() if isinstance(default_value, dict) else default_value
+                st.session_state[key] = (
+                    default_value.copy()
+                    if isinstance(default_value, dict)
+                    else default_value
+                )
             st.rerun()
-    else:
-        st.page_link(
-            "pages/login.py",
-            label="登录 / 注册",
-            icon="🔐",
-            use_container_width=True,
-        )
-        st.info("请先登录后参与匹配")
-    if st.session_state.get("auth_user"):
         st.page_link(
             "pages/home.py",
             label="首页",
@@ -310,98 +331,98 @@ with st.sidebar:
             icon="📝",
             use_container_width=True,
         )
-    if st.session_state.get("auth_user") and (PROJECT_ROOT / "pages" / "matching.py").exists():
-        st.page_link(
-            "pages/matching.py",
-            label="开始匹配",
-            icon="🔎",
-            use_container_width=True,
-        )
-    if st.session_state.get("auth_user") and (PROJECT_ROOT / "pages" / "result.py").exists():
-        st.page_link(
-            "pages/result.py",
-            label="匹配结果",
-            icon="✨",
-            use_container_width=True,
-        )
-    if st.session_state.get("auth_user") and (PROJECT_ROOT / "pages" / "ai_insights.py").exists():
-        st.page_link(
-            "pages/ai_insights.py",
-            label="AI 洞察",
-            icon="💡",
-            use_container_width=True,
-        )
-    st.divider()
-    st.markdown("**MutualLink Created**")
-    selected_type = st.session_state.get("selected_match_type")
-    type_icons = {"study": "📚", "sport": "🏃", "interest": "🎨"}
-    type_labels_zh = {
-        "study": "学习搭子",
-        "sport": "运动搭子",
-        "interest": "兴趣活动搭子",
-    }
-    if selected_type in type_labels_zh:
-        selected_label = type_labels_zh[selected_type]
-        st.success(f"当前选择：{type_icons[selected_type]} {selected_label}")
-    else:
-        st.info("请先在首页选择搭子类型")
-
-with st.container(key="top_right_settings"):
-    with st.popover("⚙️ 设置", help="查看应用部署选项"):
-        st.markdown("### 部署应用")
-        st.caption("选择适合项目用途的部署方式。")
-
-        community_tab, snowflake_tab, custom_tab = st.tabs(
-            ["社区云", "Snowflake", "其他平台"]
-        )
-
-        with community_tab:
-            st.markdown("#### Streamlit 社区云")
-            st.write("适合个人项目、课程作业与学习展示，可免费部署公开应用。")
-            st.markdown(
-                "- 连接 GitHub 仓库后快速部署\n"
-                "- 支持公开应用和分享链接\n"
-                "- 可浏览并学习社区中的热门应用"
-            )
-            st.link_button(
-                "立即部署",
-                "https://share.streamlit.io/",
+        if (PROJECT_ROOT / "pages" / "matching.py").exists():
+            st.page_link(
+                "pages/matching.py",
+                label="开始匹配",
+                icon="🔎",
                 use_container_width=True,
             )
-            st.link_button(
-                "查看部署说明",
-                "https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/deploy",
+        if (PROJECT_ROOT / "pages" / "result.py").exists():
+            st.page_link(
+                "pages/result.py",
+                label="匹配结果",
+                icon="✨",
                 use_container_width=True,
             )
-
-        with snowflake_tab:
-            st.markdown("#### Snowflake")
-            st.write("适合需要企业级安全、数据集成和托管基础设施的应用。")
-            st.markdown(
-                "- 使用企业级权限与安全管理\n"
-                "- 部署带角色访问控制的私有应用\n"
-                "- 与 Snowflake 数据平台直接集成"
-            )
-            st.link_button(
-                "查看部署指南",
-                "https://docs.snowflake.com/en/developer-guide/streamlit/getting-started/overview",
+        if (PROJECT_ROOT / "pages" / "ai_insights.py").exists():
+            st.page_link(
+                "pages/ai_insights.py",
+                label="AI 洞察",
+                icon="💡",
                 use_container_width=True,
             )
+        st.divider()
+        st.markdown("**MutualLink Created**")
+        selected_type = st.session_state.get("selected_match_type")
+        type_icons = {"study": "📚", "sport": "🏃", "interest": "🎨"}
+        type_labels_zh = {
+            "study": "学习搭子",
+            "sport": "运动搭子",
+            "interest": "兴趣活动搭子",
+        }
+        if selected_type in type_labels_zh:
+            selected_label = type_labels_zh[selected_type]
+            st.success(f"当前选择：{type_icons[selected_type]} {selected_label}")
+        else:
+            st.info("请先在首页选择搭子类型")
 
-        with custom_tab:
-            st.markdown("#### 自定义部署")
-            st.write("适合部署到自有硬件、服务器或其他云服务。")
-            st.markdown(
-                "- 自行选择服务器或云平台\n"
-                "- 自主管理身份认证和运行资源\n"
-                "- 自主控制运维方式与成本"
-            )
-            st.link_button(
-                "查看其他部署方式",
-                "https://docs.streamlit.io/deploy/tutorials",
-                use_container_width=True,
+    with st.container(key="top_right_settings"):
+        with st.popover("⚙️ 设置", help="查看应用部署选项"):
+            st.markdown("### 部署应用")
+            st.caption("选择适合项目用途的部署方式。")
+
+            community_tab, snowflake_tab, custom_tab = st.tabs(
+                ["社区云", "Snowflake", "其他平台"]
             )
 
-        st.caption("部署操作会在对应平台中完成，不会修改本地问卷数据。")
+            with community_tab:
+                st.markdown("#### Streamlit 社区云")
+                st.write("适合个人项目、课程作业与学习展示，可免费部署公开应用。")
+                st.markdown(
+                    "- 连接 GitHub 仓库后快速部署\n"
+                    "- 支持公开应用和分享链接\n"
+                    "- 可浏览并学习社区中的热门应用"
+                )
+                st.link_button(
+                    "立即部署",
+                    "https://share.streamlit.io/",
+                    use_container_width=True,
+                )
+                st.link_button(
+                    "查看部署说明",
+                    "https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/deploy",
+                    use_container_width=True,
+                )
+
+            with snowflake_tab:
+                st.markdown("#### Snowflake")
+                st.write("适合需要企业级安全、数据集成和托管基础设施的应用。")
+                st.markdown(
+                    "- 使用企业级权限与安全管理\n"
+                    "- 部署带角色访问控制的私有应用\n"
+                    "- 与 Snowflake 数据平台直接集成"
+                )
+                st.link_button(
+                    "查看部署指南",
+                    "https://docs.snowflake.com/en/developer-guide/streamlit/getting-started/overview",
+                    use_container_width=True,
+                )
+
+            with custom_tab:
+                st.markdown("#### 自定义部署")
+                st.write("适合部署到自有硬件、服务器或其他云服务。")
+                st.markdown(
+                    "- 自行选择服务器或云平台\n"
+                    "- 自主管理身份认证和运行资源\n"
+                    "- 自主控制运维方式与成本"
+                )
+                st.link_button(
+                    "查看其他部署方式",
+                    "https://docs.streamlit.io/deploy/tutorials",
+                    use_container_width=True,
+                )
+
+            st.caption("部署操作会在对应平台中完成，不会修改本地问卷数据。")
 
 navigation.run()

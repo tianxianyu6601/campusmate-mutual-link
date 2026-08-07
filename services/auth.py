@@ -141,8 +141,9 @@ def send_email(to_email: str, subject: str, body: str) -> None:
     message["Subject"] = subject
     message.set_content(body)
 
-    with smtplib.SMTP(str(config["host"]), int(config["port"]), timeout=20) as server:
-        if bool(config.get("use_tls", True)):
+    smtp_class = smtplib.SMTP_SSL if bool(config.get("use_ssl", False)) else smtplib.SMTP
+    with smtp_class(str(config["host"]), int(config["port"]), timeout=20) as server:
+        if bool(config.get("use_tls", True)) and not bool(config.get("use_ssl", False)):
             server.starttls()
         server.login(str(config["username"]), str(config["password"]))
         server.send_message(message)
@@ -178,6 +179,8 @@ def send_verification_code(email: str) -> str | None:
         send_email(email, "CampusMate 注册验证码", body)
     except MailNotConfigured:
         return code
+    except (OSError, smtplib.SMTPException) as error:
+        raise AuthError(f"验证码邮件发送失败：{error}") from error
     return None
 
 
@@ -288,6 +291,9 @@ def send_match_notification(
     except MailNotConfigured as error:
         status = "not_configured"
         message = str(error)
+    except (OSError, smtplib.SMTPException) as error:
+        status = "failed"
+        message = f"匹配通知邮件发送失败：{error}"
     init_db()
     with _db() as connection:
         connection.execute(

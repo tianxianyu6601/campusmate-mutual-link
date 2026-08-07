@@ -16,78 +16,162 @@ from services.auth import (
 
 init_db()
 
-st.markdown('<div class="campusmate-kicker">CampusMate 账号</div>', unsafe_allow_html=True)
-st.title("邮箱登录 / 注册")
-st.caption("先用邮箱确认身份，再填写行动卡并参加匹配。")
-
 if st.session_state.get("auth_user"):
-    user = st.session_state.auth_user
-    st.success(f"已登录：{user['email']}（匿名编号 {user['user_id']}）")
-    if st.button("进入首页", type="primary"):
-        st.switch_page("pages/home.py")
-    if st.button("退出登录"):
-        for key in (
-            "auth_user",
-            "selected_match_type",
-            "questionnaire_answers",
-            "current_profile",
-            "matching_run",
-            "current_match",
-        ):
-            st.session_state[key] = None if key != "questionnaire_answers" else {}
-        st.rerun()
-    st.stop()
+    st.switch_page("pages/home.py")
 
-email = st.text_input("邮箱", placeholder="your.name@example.com")
-email_ready = bool(email.strip())
-existing = False
-if email_ready:
-    try:
-        existing = account_exists(email)
-    except AuthError as error:
-        st.error(str(error))
-
-if existing:
-    st.subheader("已有账号，输入密码登录")
-    with st.form("login_form"):
-        password = st.text_input("密码", type="password")
-        submitted = st.form_submit_button("登录", type="primary")
-    if submitted:
-        try:
-            st.session_state.auth_user = authenticate(email, password)
-        except AuthError as error:
-            st.error(str(error))
-        else:
-            st.success("登录成功")
-            st.switch_page("pages/home.py")
+if "login_mode_next" in st.session_state:
+    st.session_state["login_mode"] = st.session_state.pop("login_mode_next")
 else:
-    st.subheader("新邮箱，先发送验证码完成注册")
-    st.info("如果部署环境未配置 SMTP，页面会显示验证码用于课程演示；配置后会真实发送到邮箱。")
-    if st.button("向邮箱发送验证码", disabled=not email_ready):
-        try:
-            debug_code = send_verification_code(email)
-        except AuthError as error:
-            st.error(str(error))
-        else:
-            if debug_code:
-                st.warning(f"邮件服务未配置。演示验证码：{debug_code}")
-            else:
-                st.success("验证码已发送，请检查邮箱和垃圾箱。")
+    st.session_state.setdefault("login_mode", "登录")
 
-    with st.form("register_form"):
-        code = st.text_input("验证码", max_chars=6)
-        password = st.text_input("设置密码", type="password")
-        confirm = st.text_input("确认密码", type="password")
-        submitted = st.form_submit_button("确认注册", type="primary")
-    if submitted:
-        if password != confirm:
-            st.error("两次输入的密码不一致")
+st.markdown(
+    """
+    <style>
+      .stApp {
+        background:
+          radial-gradient(circle at 15% 18%, rgba(47, 111, 237, 0.13), transparent 26rem),
+          radial-gradient(circle at 82% 88%, rgba(43, 183, 169, 0.16), transparent 28rem),
+          linear-gradient(180deg, #ffffff 0%, #f6f8fc 100%) !important;
+      }
+      div[class*="st-key-login_shell"] {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 4rem 1.25rem;
+      }
+      div[class*="st-key-login_card"] {
+        width: min(560px, calc(100vw - 2rem));
+        background: rgba(255, 255, 255, 0.94);
+        border: 1.5px solid rgba(17, 17, 17, 0.16);
+        border-radius: 0.65rem;
+        box-shadow: 0 22px 60px rgba(17, 17, 17, 0.12);
+        padding: 3rem 3.1rem 2.7rem;
+      }
+      div[class*="st-key-login_card"] h1 {
+        color: #20263a !important;
+        font-size: 3rem !important;
+        line-height: 1.1 !important;
+        text-align: center;
+      }
+      .login-welcome {
+        color: #5d6572 !important;
+        font-size: 1.05rem;
+        font-weight: 650;
+        margin: -0.45rem 0 1.55rem;
+        text-align: center;
+      }
+      div[class*="st-key-login_card"] p,
+      div[class*="st-key-login_card"] label,
+      div[class*="st-key-login_card"] span {
+        color: #5d6572 !important;
+      }
+      div[class*="st-key-login_card"] [data-testid="stTextInput"] input {
+        border-radius: 0.25rem !important;
+        min-height: 3.25rem;
+      }
+      div[class*="st-key-login_card"] div[data-testid="stButton"] > button,
+      div[class*="st-key-login_card"] div[data-testid="stFormSubmitButton"] > button {
+        min-height: 3.25rem !important;
+        border-radius: 0.25rem !important;
+        font-weight: 700 !important;
+      }
+      div[class*="st-key-login_card"] div[data-testid="stFormSubmitButton"] > button {
+        background: #cf7f91 !important;
+        border: 2px solid #cf7f91 !important;
+        color: #ffffff !important;
+      }
+      div[class*="st-key-login_card"] div[data-testid="stFormSubmitButton"] > button p {
+        color: #ffffff !important;
+      }
+      @media (max-width: 640px) {
+        div[class*="st-key-login_card"] {
+          padding: 2.1rem 1.35rem 2rem;
+        }
+        div[class*="st-key-login_card"] h1 {
+          font-size: 2.25rem !important;
+        }
+      }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+with st.container(key="login_shell"):
+    with st.container(key="login_card"):
+        st.title("注册 / 登录")
+        st.markdown(
+            '<p class="login-welcome">欢迎来到 CampusMate，一起来寻找你的搭子。</p>',
+            unsafe_allow_html=True,
+        )
+        if st.session_state.get("login_notice"):
+            st.success(st.session_state.pop("login_notice"))
+
+        mode = st.segmented_control(
+            "选择操作",
+            ["登录", "注册"],
+            key="login_mode",
+            label_visibility="collapsed",
+        )
+
+        if mode == "登录":
+            with st.form("login_form"):
+                email = st.text_input(
+                    "邮箱",
+                    key="login_email",
+                    placeholder="your.name@pku.edu.cn / your.name@example.com",
+                )
+                password = st.text_input("密码", type="password", key="login_password")
+                submitted = st.form_submit_button("登录", type="primary")
+
+            if submitted:
+                try:
+                    st.session_state.auth_user = authenticate(email, password)
+                except AuthError as error:
+                    st.error(str(error))
+                else:
+                    st.switch_page("pages/home.py")
+
         else:
-            try:
-                user = register_user(email, password, code)
-            except AuthError as error:
-                st.error(str(error))
-            else:
-                st.session_state.auth_user = user
-                st.success("注册成功，已自动登录。")
-                st.switch_page("pages/home.py")
+            register_email = st.text_input(
+                "邮箱",
+                key="register_email",
+                placeholder="your.name@pku.edu.cn / your.name@example.com",
+            )
+            if st.button("向邮箱发送验证码"):
+                try:
+                    if account_exists(register_email):
+                        st.warning("这个邮箱已经注册，请切换到登录。")
+                    else:
+                        debug_code = send_verification_code(register_email)
+                        if debug_code:
+                            st.warning(
+                                f"邮件服务尚未配置。演示验证码：{debug_code}"
+                            )
+                        else:
+                            st.success("验证码已发送，请检查邮箱和垃圾箱。")
+                except AuthError as error:
+                    st.error(str(error))
+
+            with st.form("register_form"):
+                code = st.text_input("验证码", max_chars=6, key="register_code")
+                password = st.text_input(
+                    "设置密码", type="password", key="register_password"
+                )
+                confirm = st.text_input(
+                    "确认密码", type="password", key="register_confirm"
+                )
+                submitted = st.form_submit_button("确认注册", type="primary")
+
+            if submitted:
+                if password != confirm:
+                    st.error("两次输入的密码不一致。")
+                else:
+                    try:
+                        register_user(register_email, password, code)
+                    except AuthError as error:
+                        st.error(str(error))
+                    else:
+                        st.session_state.login_mode_next = "登录"
+                        st.session_state.login_notice = "注册成功，请输入密码登录。"
+                        st.rerun()
