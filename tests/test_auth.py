@@ -5,6 +5,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from services import auth
 
@@ -31,6 +32,24 @@ class AuthTests(unittest.TestCase):
         auth.register_user("person@example.com", "password123", str(code))
         with self.assertRaises(auth.AuthError):
             auth.authenticate("person@example.com", "wrong-password")
+
+    def test_smtp_placeholder_is_rejected_before_login(self) -> None:
+        with patch(
+            "services.auth.st.secrets",
+            {
+                "smtp": {
+                    "host": "smtp.qq.com",
+                    "port": 465,
+                    "username": "你的发件邮箱@qq.com",
+                    "password": "你的SMTP授权码",
+                    "from_email": "CampusMate <sender@qq.com>",
+                    "use_ssl": True,
+                    "use_tls": False,
+                }
+            },
+        ):
+            with self.assertRaisesRegex(auth.AuthError, "SMTP"):
+                auth.send_verification_code("receiver@example.com")
 
 
 if __name__ == "__main__":

@@ -130,7 +130,24 @@ def _smtp_config() -> dict[str, Any]:
     missing = [key for key in required if not config.get(key)]
     if missing:
         raise MailNotConfigured(f"SMTP 配置缺少：{', '.join(missing)}")
-    return dict(config)
+    normalized_config = dict(config)
+    placeholder_markers = ("your_", "example.com", "你的", "授权码")
+    for key in ("host", "username", "password"):
+        value = str(normalized_config[key])
+        if any(marker in value for marker in placeholder_markers):
+            raise AuthError(
+                "SMTP Secrets 仍然是示例占位内容，请填写真实发件邮箱和 SMTP 授权码。"
+            )
+    for key in ("username", "password"):
+        value = str(normalized_config[key])
+        try:
+            value.encode("ascii")
+        except UnicodeEncodeError as error:
+            raise AuthError(
+                "SMTP 用户名和授权码只能使用真实邮箱服务提供的英文/数字内容，"
+                "不能包含中文占位符或中文标点。"
+            ) from error
+    return normalized_config
 
 
 def send_email(to_email: str, subject: str, body: str) -> None:
@@ -179,7 +196,9 @@ def send_verification_code(email: str) -> str | None:
         send_email(email, "CampusMate 注册验证码", body)
     except MailNotConfigured:
         return code
-    except (OSError, smtplib.SMTPException) as error:
+    except AuthError:
+        raise
+    except (OSError, smtplib.SMTPException, UnicodeEncodeError) as error:
         raise AuthError(f"验证码邮件发送失败：{error}") from error
     return None
 
