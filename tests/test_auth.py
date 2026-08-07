@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import smtplib
 from pathlib import Path
 from unittest.mock import patch
 
@@ -50,6 +51,41 @@ class AuthTests(unittest.TestCase):
         ):
             with self.assertRaisesRegex(auth.AuthError, "SMTP"):
                 auth.send_verification_code("receiver@example.com")
+
+    def test_qq_smtp_falls_back_from_ssl_to_starttls(self) -> None:
+        calls: list[tuple[int, bool, bool]] = []
+
+        def fake_send_once(config, attempt, message) -> None:
+            calls.append(
+                (
+                    int(attempt["port"]),
+                    bool(attempt["use_ssl"]),
+                    bool(attempt["use_tls"]),
+                )
+            )
+            if int(attempt["port"]) == 465:
+                raise smtplib.SMTPServerDisconnected("Connection unexpectedly closed")
+
+        with (
+            patch(
+                "services.auth.st.secrets",
+                {
+                    "smtp": {
+                        "host": "smtp.qq.com",
+                        "port": 465,
+                        "username": "123456789@qq.com",
+                        "password": "abcdefghijklmnop",
+                        "from_email": "CampusMate <123456789@qq.com>",
+                        "use_ssl": True,
+                        "use_tls": False,
+                    }
+                },
+            ),
+            patch("services.auth._send_email_once", side_effect=fake_send_once),
+        ):
+            auth.send_email("receiver@example.com", "Subject", "Body")
+
+        self.assertEqual([(465, True, False), (587, False, True)], calls)
 
 
 if __name__ == "__main__":

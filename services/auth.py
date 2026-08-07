@@ -9,6 +9,7 @@ import re
 import secrets
 import smtplib
 import sqlite3
+import ssl
 import time
 from contextlib import contextmanager
 from email.message import EmailMessage
@@ -119,6 +120,14 @@ def _next_user_id(connection: sqlite3.Connection) -> str:
     return f"U{max(numbers, default=50) + 1:04d}"
 
 
+def _as_bool(value: Any, *, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
 def _smtp_config() -> dict[str, Any]:
     try:
         config = st.secrets.get("smtp", None)
@@ -131,6 +140,20 @@ def _smtp_config() -> dict[str, Any]:
     if missing:
         raise MailNotConfigured(f"SMTP 配置缺少：{', '.join(missing)}")
     normalized_config = dict(config)
+    try:
+        normalized_config["port"] = int(normalized_config["port"])
+    except (TypeError, ValueError) as error:
+        raise AuthError("SMTP port 必须是数字，例如 465 或 587。") from error
+
+    normalized_config["host"] = str(normalized_config["host"]).strip()
+    normalized_config["username"] = str(normalized_config["username"]).strip()
+    # App passwords are commonly copied with visual spaces; SMTP auth expects
+    # the raw token. This keeps QQ/Gmail-style authorization codes usable.
+    normalized_config["password"] = re.sub(
+        r"\s+", "", str(normalized_config["password"])
+    )
+    normalized_config["from_email"] = str(normalized_config["from_email"]).strip()
+
     placeholder_markers = ("your_", "example.com", "你的", "授权码")
     for key in ("host", "username", "password"):
         value = str(normalized_config[key])
@@ -147,7 +170,74 @@ def _smtp_config() -> dict[str, Any]:
                 "SMTP 用户名和授权码只能使用真实邮箱服务提供的英文/数字内容，"
                 "不能包含中文占位符或中文标点。"
             ) from error
+    host = str(normalized_config["host"]).lower()
+    if host == "smtp.qq.com" and not re.fullmatch(
+        r"[A-Za-z0-9]{16}", str(normalized_config["password"])
+    ):
+        raise AuthError(
+            "QQ 邮箱的 SMTP password 必须填写 16 位授权码，不是 QQ 登录密码。"
+        )
+    port = int(normalized_config["port"])
+    if port == 465:
+        normalized_config["use_ssl"] = True
+        normalized_config["use_tls"] = False
+    elif port == 587:
+        normalized_config["use_ssl"] = False
+        normalized_config["use_tls"] = True
+    else:
+        normalized_config["use_ssl"] = _as_bool(normalized_config.get("use_ssl"))
+        normalized_config["use_tls"] = _as_bool(normalized_config.get("use_tls"))
     return normalized_config
+
+
+def _smtp_attempts(config: Mapping[str, Any]) -> list[dict[str, Any]]:
+    attempts = [
+        {
+            "host": str(config["host"]),
+            "port": int(config["port"]),
+            "use_ssl": bool(config.get("use_ssl")),
+            "use_tls": bool(config.get("use_tls")),
+        }
+    ]
+    if str(config["host"]).lower() == "smtp.qq.com":
+        fallback = {"host": "smtp.qq.com", "port": 587, "use_ssl": False, "use_tls": True}
+        if int(config["port"]) == 587:
+            fallback = {"host": "smtp.qq.com", "port": 465, "use_ssl": True, "use_tls": False}
+        if fallback not in attempts:
+            attempts.append(fallback)
+    return attempts
+
+
+def _describe_attempt(attempt: Mapping[str, Any]) -> str:
+    mode = "SSL" if attempt.get("use_ssl") else "STARTTLS" if attempt.get("use_tls") else "plain"
+    return f"{attempt['host']}:{attempt['port']} {mode}"
+
+
+def _send_email_once(
+    config: Mapping[str, Any],
+    attempt: Mapping[str, Any],
+    message: EmailMessage,
+) -> None:
+    context = ssl.create_default_context()
+    if bool(attempt.get("use_ssl")):
+        with smtplib.SMTP_SSL(
+            str(attempt["host"]),
+            int(attempt["port"]),
+            timeout=30,
+            context=context,
+        ) as server:
+            server.ehlo()
+            server.login(str(config["username"]), str(config["password"]))
+            server.send_message(message)
+        return
+
+    with smtplib.SMTP(str(attempt["host"]), int(attempt["port"]), timeout=30) as server:
+        server.ehlo()
+        if bool(attempt.get("use_tls")):
+            server.starttls(context=context)
+            server.ehlo()
+        server.login(str(config["username"]), str(config["password"]))
+        server.send_message(message)
 
 
 def send_email(to_email: str, subject: str, body: str) -> None:
@@ -158,12 +248,23 @@ def send_email(to_email: str, subject: str, body: str) -> None:
     message["Subject"] = subject
     message.set_content(body)
 
-    smtp_class = smtplib.SMTP_SSL if bool(config.get("use_ssl", False)) else smtplib.SMTP
-    with smtp_class(str(config["host"]), int(config["port"]), timeout=20) as server:
-        if bool(config.get("use_tls", True)) and not bool(config.get("use_ssl", False)):
-            server.starttls()
-        server.login(str(config["username"]), str(config["password"]))
-        server.send_message(message)
+    failures: list[str] = []
+    for attempt in _smtp_attempts(config):
+        try:
+            _send_email_once(config, attempt, message)
+            return
+        except smtplib.SMTPAuthenticationError as error:
+            raise AuthError(
+                "SMTP 登录失败：请确认邮箱已开启 SMTP 服务，password 填的是授权码，"
+                "不是邮箱登录密码。"
+            ) from error
+        except (OSError, smtplib.SMTPException, TimeoutError) as error:
+            failures.append(f"{_describe_attempt(attempt)} -> {error}")
+    attempted = "；".join(failures)
+    raise AuthError(
+        "验证码邮件发送失败：SMTP 服务器断开或连接失败。"
+        f"已尝试：{attempted}"
+    )
 
 
 def create_verification_code(email: str) -> str:
