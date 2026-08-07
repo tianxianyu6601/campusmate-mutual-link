@@ -304,21 +304,31 @@ def _send_email_sendgrid(to_email: str, subject: str, body: str) -> None:
         raise AuthError(f"SendGrid 发信失败：{error.reason}") from error
 
 
-def _preferred_mail_provider() -> str:
+def _configured_mail_provider() -> str | None:
     try:
         configured = st.secrets.get("mail_provider", None)
     except Exception:
-        configured = None
-    if configured:
-        provider = str(configured).strip().lower()
-        if provider not in {"smtp", "resend", "sendgrid"}:
-            raise AuthError("mail_provider 只能填写 smtp、resend 或 sendgrid。")
-        return provider
+        return None
+    if not configured:
+        return None
+    provider = str(configured).strip().lower()
+    if provider not in {"auto", "smtp", "resend", "sendgrid"}:
+        raise AuthError("mail_provider 只能填写 auto、smtp、resend 或 sendgrid。")
+    return provider
+
+
+def _mail_provider_order() -> list[str]:
+    provider = _configured_mail_provider()
+    if provider and provider != "auto":
+        return [provider]
+
+    providers: list[str] = []
     if _sendgrid_config():
-        return "sendgrid"
+        providers.append("sendgrid")
     if _resend_config():
-        return "resend"
-    return "smtp"
+        providers.append("resend")
+    providers.append("smtp")
+    return providers
 
 
 def _smtp_attempts(config: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -372,37 +382,59 @@ def _send_email_once(
 
 
 def send_email(to_email: str, subject: str, body: str) -> None:
-    provider = _preferred_mail_provider()
-    if provider == "sendgrid":
-        _send_email_sendgrid(to_email, subject, body)
-        return
-    if provider == "resend":
-        _send_email_resend(to_email, subject, body)
-        return
-
-    config = _smtp_config()
-    message = EmailMessage()
-    message["From"] = str(config["from_email"])
-    message["To"] = normalize_email(to_email)
-    message["Subject"] = subject
-    message.set_content(body)
-
+    configured_provider = _configured_mail_provider()
     failures: list[str] = []
-    for attempt in _smtp_attempts(config):
+    missing_provider_count = 0
+
+    for provider in _mail_provider_order():
         try:
-            _send_email_once(config, attempt, message)
-            return
-        except smtplib.SMTPAuthenticationError as error:
+            if provider == "sendgrid":
+                _send_email_sendgrid(to_email, subject, body)
+                return
+            if provider == "resend":
+                _send_email_resend(to_email, subject, body)
+                return
+
+            config = _smtp_config()
+            message = EmailMessage()
+            message["From"] = str(config["from_email"])
+            message["To"] = normalize_email(to_email)
+            message["Subject"] = subject
+            message.set_content(body)
+
+            smtp_failures: list[str] = []
+            for attempt in _smtp_attempts(config):
+                try:
+                    _send_email_once(config, attempt, message)
+                    return
+                except smtplib.SMTPAuthenticationError as error:
+                    raise AuthError(
+                        "SMTP 登录失败：请确认邮箱已开启 SMTP 服务，password 填的是授权码，"
+                        "不是邮箱登录密码。"
+                    ) from error
+                except (OSError, smtplib.SMTPException, TimeoutError) as error:
+                    smtp_failures.append(f"{_describe_attempt(attempt)} -> {error}")
             raise AuthError(
-                "SMTP 登录失败：请确认邮箱已开启 SMTP 服务，password 填的是授权码，"
-                "不是邮箱登录密码。"
-            ) from error
-        except (OSError, smtplib.SMTPException, TimeoutError) as error:
-            failures.append(f"{_describe_attempt(attempt)} -> {error}")
-    attempted = "；".join(failures)
+                "SMTP 服务器断开或连接失败。"
+                f"已尝试：{'；'.join(smtp_failures)}"
+            )
+        except MailNotConfigured as error:
+            missing_provider_count += 1
+            failures.append(f"{provider}: {error}")
+            if configured_provider and configured_provider != "auto":
+                raise
+        except AuthError as error:
+            failures.append(f"{provider}: {error}")
+            if configured_provider and configured_provider != "auto":
+                raise
+
+    if failures and missing_provider_count == len(failures):
+        raise MailNotConfigured("尚未配置真实邮件服务")
+    if len(failures) == 1:
+        raise AuthError(f"验证码邮件发送失败：{failures[0]}")
     raise AuthError(
-        "验证码邮件发送失败：SMTP 服务器断开或连接失败。"
-        f"已尝试：{attempted}"
+        "验证码邮件发送失败：所有已配置邮件通道均失败。"
+        f"详情：{'；'.join(failures)}"
     )
 
 
@@ -411,34 +443,49 @@ def diagnose_mail_service(to_email: str) -> list[str]:
 
     normalized = normalize_email(to_email)
     report: list[str] = []
-    provider = _preferred_mail_provider()
-    report.append(f"当前邮件通道：{provider}")
-    if provider == "sendgrid":
-        config = _sendgrid_config()
-        report.append(
-            f"SendGrid from_email：{config['from_email'] if config else '未配置'}"
+    providers = _mail_provider_order()
+    report.append(f"当前邮件通道：{' -> '.join(providers)}")
+    for provider in providers:
+        if provider == "sendgrid":
+            _diagnose_sendgrid(normalized, report)
+        elif provider == "resend":
+            _diagnose_resend(normalized, report)
+        else:
+            _diagnose_smtp(normalized, report)
+    return report
+
+
+def _diagnose_sendgrid(normalized_email: str, report: list[str]) -> None:
+    config = _sendgrid_config()
+    report.append(
+        f"SendGrid from_email：{config['from_email'] if config else '未配置'}"
+    )
+    try:
+        _send_email_sendgrid(
+            normalized_email,
+            "CampusMate 邮件服务自检",
+            "这是一封 CampusMate 邮件服务自检邮件。",
         )
-        try:
-            _send_email_sendgrid(
-                normalized,
-                "CampusMate 邮件服务自检",
-                "这是一封 CampusMate 邮件服务自检邮件。",
-            )
-            report.append("SendGrid 自检成功：测试邮件已发送。")
-        except (AuthError, MailNotConfigured) as error:
-            report.append(f"SendGrid 自检失败：{error}")
-        return report
+        report.append("SendGrid 自检成功：测试邮件已发送。")
+    except (AuthError, MailNotConfigured) as error:
+        report.append(f"SendGrid 自检失败：{error}")
 
-    if provider == "resend":
-        config = _resend_config()
-        report.append(f"Resend from_email：{config['from_email'] if config else '未配置'}")
-        try:
-            _send_email_resend(normalized, "CampusMate 邮件服务自检", "这是一封 CampusMate 邮件服务自检邮件。")
-            report.append("Resend 自检成功：测试邮件已发送。")
-        except (AuthError, MailNotConfigured) as error:
-            report.append(f"Resend 自检失败：{error}")
-        return report
 
+def _diagnose_resend(normalized_email: str, report: list[str]) -> None:
+    config = _resend_config()
+    report.append(f"Resend from_email：{config['from_email'] if config else '未配置'}")
+    try:
+        _send_email_resend(
+            normalized_email,
+            "CampusMate 邮件服务自检",
+            "这是一封 CampusMate 邮件服务自检邮件。",
+        )
+        report.append("Resend 自检成功：测试邮件已发送。")
+    except (AuthError, MailNotConfigured) as error:
+        report.append(f"Resend 自检失败：{error}")
+
+
+def _diagnose_smtp(normalized_email: str, report: list[str]) -> None:
     config = _smtp_config()
     report.append(f"SMTP host：{config['host']}")
     report.append(f"SMTP username：{config['username']}")
@@ -447,7 +494,7 @@ def diagnose_mail_service(to_email: str) -> list[str]:
         try:
             message = EmailMessage()
             message["From"] = str(config["from_email"])
-            message["To"] = normalized
+            message["To"] = normalized_email
             message["Subject"] = "CampusMate 邮件服务自检"
             message.set_content("这是一封 CampusMate 邮件服务自检邮件。")
             _send_email_once(config, attempt, message)
@@ -458,7 +505,6 @@ def diagnose_mail_service(to_email: str) -> list[str]:
         else:
             report.append(f"{label}：成功，测试邮件已发送。")
             break
-    return report
 
 
 def create_verification_code(email: str) -> str:

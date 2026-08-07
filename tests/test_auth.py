@@ -182,6 +182,44 @@ class AuthTests(unittest.TestCase):
             captured["payload"]["content"],
         )
 
+    def test_auto_provider_falls_back_to_smtp(self) -> None:
+        calls: list[str] = []
+
+        def fake_sendgrid(to_email, subject, body) -> None:
+            calls.append("sendgrid")
+            raise auth.AuthError("SendGrid unavailable")
+
+        def fake_send_once(config, attempt, message) -> None:
+            calls.append(f"smtp:{attempt['port']}")
+
+        with (
+            patch(
+                "services.auth.st.secrets",
+                {
+                    "mail_provider": "auto",
+                    "sendgrid": {
+                        "api_key": "SG.123456789",
+                        "from_email": "sender@example.org",
+                        "from_name": "CampusMate",
+                    },
+                    "smtp": {
+                        "host": "smtp.qq.com",
+                        "port": 465,
+                        "username": "123456789@qq.com",
+                        "password": "abcdefghijklmnop",
+                        "from_email": "123456789@qq.com",
+                        "use_ssl": True,
+                        "use_tls": False,
+                    },
+                },
+            ),
+            patch("services.auth._send_email_sendgrid", side_effect=fake_sendgrid),
+            patch("services.auth._send_email_once", side_effect=fake_send_once),
+        ):
+            auth.send_email("receiver@example.com", "Subject", "Body")
+
+        self.assertEqual(["sendgrid", "smtp:465"], calls)
+
 
 if __name__ == "__main__":
     unittest.main()
