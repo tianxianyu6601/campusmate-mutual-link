@@ -11,6 +11,8 @@ import smtplib
 import sqlite3
 import ssl
 import time
+import urllib.error
+import urllib.request
 from contextlib import contextmanager
 from email.message import EmailMessage
 from pathlib import Path
@@ -190,6 +192,74 @@ def _smtp_config() -> dict[str, Any]:
     return normalized_config
 
 
+def _resend_config() -> dict[str, str] | None:
+    try:
+        config = st.secrets.get("resend", None)
+    except Exception:
+        return None
+    if not config:
+        return None
+    required = ("api_key", "from_email")
+    missing = [key for key in required if not config.get(key)]
+    if missing:
+        raise AuthError(f"Resend 配置缺少：{', '.join(missing)}")
+    api_key = str(config["api_key"]).strip()
+    from_email = str(config["from_email"]).strip()
+    if not api_key.startswith("re_"):
+        raise AuthError("Resend api_key 应以 re_ 开头，请检查 Secrets。")
+    if "your_" in from_email or "example.com" in from_email or "你的" in from_email:
+        raise AuthError("Resend from_email 仍然是示例占位内容。")
+    return {"api_key": api_key, "from_email": from_email}
+
+
+def _send_email_resend(to_email: str, subject: str, body: str) -> None:
+    config = _resend_config()
+    if not config:
+        raise AuthError("mail_provider = resend，但缺少 [resend] api_key/from_email 配置。")
+    payload = json.dumps(
+        {
+            "from": config["from_email"],
+            "to": [normalize_email(to_email)],
+            "subject": subject,
+            "text": body,
+        },
+        ensure_ascii=False,
+    ).encode("utf-8")
+    request = urllib.request.Request(
+        "https://api.resend.com/emails",
+        data=payload,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {config['api_key']}",
+            "Content-Type": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            if response.status < 200 or response.status >= 300:
+                raise AuthError(f"Resend 发信失败：HTTP {response.status}")
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode("utf-8", errors="replace")
+        raise AuthError(f"Resend 发信失败：HTTP {error.code} {detail}") from error
+    except urllib.error.URLError as error:
+        raise AuthError(f"Resend 发信失败：{error.reason}") from error
+
+
+def _preferred_mail_provider() -> str:
+    try:
+        configured = st.secrets.get("mail_provider", None)
+    except Exception:
+        configured = None
+    if configured:
+        provider = str(configured).strip().lower()
+        if provider not in {"smtp", "resend"}:
+            raise AuthError("mail_provider 只能填写 smtp 或 resend。")
+        return provider
+    if _resend_config():
+        return "resend"
+    return "smtp"
+
+
 def _smtp_attempts(config: Mapping[str, Any]) -> list[dict[str, Any]]:
     attempts = [
         {
@@ -241,6 +311,10 @@ def _send_email_once(
 
 
 def send_email(to_email: str, subject: str, body: str) -> None:
+    if _preferred_mail_provider() == "resend":
+        _send_email_resend(to_email, subject, body)
+        return
+
     config = _smtp_config()
     message = EmailMessage()
     message["From"] = str(config["from_email"])
@@ -265,6 +339,45 @@ def send_email(to_email: str, subject: str, body: str) -> None:
         "验证码邮件发送失败：SMTP 服务器断开或连接失败。"
         f"已尝试：{attempted}"
     )
+
+
+def diagnose_mail_service(to_email: str) -> list[str]:
+    """Return a safe, secret-free mail diagnostic report."""
+
+    normalized = normalize_email(to_email)
+    report: list[str] = []
+    provider = _preferred_mail_provider()
+    report.append(f"当前邮件通道：{provider}")
+    if provider == "resend":
+        config = _resend_config()
+        report.append(f"Resend from_email：{config['from_email'] if config else '未配置'}")
+        try:
+            _send_email_resend(normalized, "CampusMate 邮件服务自检", "这是一封 CampusMate 邮件服务自检邮件。")
+            report.append("Resend 自检成功：测试邮件已发送。")
+        except (AuthError, MailNotConfigured) as error:
+            report.append(f"Resend 自检失败：{error}")
+        return report
+
+    config = _smtp_config()
+    report.append(f"SMTP host：{config['host']}")
+    report.append(f"SMTP username：{config['username']}")
+    for attempt in _smtp_attempts(config):
+        label = _describe_attempt(attempt)
+        try:
+            message = EmailMessage()
+            message["From"] = str(config["from_email"])
+            message["To"] = normalized
+            message["Subject"] = "CampusMate 邮件服务自检"
+            message.set_content("这是一封 CampusMate 邮件服务自检邮件。")
+            _send_email_once(config, attempt, message)
+        except smtplib.SMTPAuthenticationError:
+            report.append(f"{label}：登录失败，请检查 SMTP 服务是否开启、授权码是否正确。")
+        except (OSError, smtplib.SMTPException, TimeoutError) as error:
+            report.append(f"{label}：失败：{error}")
+        else:
+            report.append(f"{label}：成功，测试邮件已发送。")
+            break
+    return report
 
 
 def create_verification_code(email: str) -> str:
@@ -410,6 +523,9 @@ def send_match_notification(
         message = "匹配通知邮件已发送"
     except MailNotConfigured as error:
         status = "not_configured"
+        message = str(error)
+    except AuthError as error:
+        status = "failed"
         message = str(error)
     except (OSError, smtplib.SMTPException) as error:
         status = "failed"

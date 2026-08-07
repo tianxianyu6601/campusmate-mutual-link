@@ -8,6 +8,7 @@ from services.auth import (
     AuthError,
     account_exists,
     authenticate,
+    diagnose_mail_service,
     init_db,
     register_user,
     send_verification_code,
@@ -149,6 +150,15 @@ with st.container(key="login_shell"):
                             st.success("验证码已发送，请检查邮箱和垃圾箱。")
                 except AuthError as error:
                     st.error(str(error))
+
+            with st.expander("邮件服务自检"):
+                st.caption("用于定位线上发信失败原因；不会显示任何密钥。")
+                if st.button("测试邮件服务", key="mail_diagnostic"):
+                    try:
+                        for line in diagnose_mail_service(register_email):
+                            st.write(f"- {line}")
+                    except AuthError as error:
+                        st.error(str(error))
 
             with st.form("register_form"):
                 code = st.text_input("验证码", max_chars=6, key="register_code")

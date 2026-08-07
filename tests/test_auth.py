@@ -5,6 +5,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 import smtplib
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -86,6 +87,48 @@ class AuthTests(unittest.TestCase):
             auth.send_email("receiver@example.com", "Subject", "Body")
 
         self.assertEqual([(465, True, False), (587, False, True)], calls)
+
+    def test_resend_provider_posts_email_api_request(self) -> None:
+        class FakeResponse:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+        captured = {}
+
+        def fake_urlopen(request, timeout):
+            captured["url"] = request.full_url
+            captured["timeout"] = timeout
+            captured["headers"] = dict(request.header_items())
+            captured["payload"] = json.loads(request.data.decode("utf-8"))
+            return FakeResponse()
+
+        with (
+            patch(
+                "services.auth.st.secrets",
+                {
+                    "mail_provider": "resend",
+                    "resend": {
+                        "api_key": "re_123456789",
+                        "from_email": "CampusMate <notify@example.org>",
+                    },
+                },
+            ),
+            patch("services.auth.urllib.request.urlopen", side_effect=fake_urlopen),
+        ):
+            auth.send_email("receiver@example.com", "Subject", "Body")
+
+        self.assertEqual("https://api.resend.com/emails", captured["url"])
+        self.assertEqual(30, captured["timeout"])
+        self.assertEqual("Bearer re_123456789", captured["headers"]["Authorization"])
+        self.assertEqual("CampusMate <notify@example.org>", captured["payload"]["from"])
+        self.assertEqual(["receiver@example.com"], captured["payload"]["to"])
+        self.assertEqual("Subject", captured["payload"]["subject"])
+        self.assertEqual("Body", captured["payload"]["text"])
 
 
 if __name__ == "__main__":
