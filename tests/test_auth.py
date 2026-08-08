@@ -35,6 +35,17 @@ class AuthTests(unittest.TestCase):
         with self.assertRaises(auth.AuthError):
             auth.authenticate("person@example.com", "wrong-password")
 
+    def test_require_login_redirects_when_session_is_missing(self) -> None:
+        with (
+            patch("services.auth.st.session_state", {}),
+            patch("services.auth.st.switch_page") as switch_page,
+            patch("services.auth.st.stop", side_effect=RuntimeError("stopped")),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "stopped"):
+                auth.require_login()
+
+        switch_page.assert_called_once_with("pages/login.py")
+
     def test_password_reset_updates_login_password(self) -> None:
         register_code = auth.send_verification_code("person@example.com")
         auth.register_user("person@example.com", "password123", str(register_code))

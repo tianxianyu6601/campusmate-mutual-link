@@ -744,8 +744,6 @@ def send_match_notification(
 def require_login() -> dict[str, str]:
     user = st.session_state.get("auth_user")
     if not user:
-        st.warning("请先使用邮箱登录或注册。")
-        if st.button("去登录", type="primary"):
-            st.switch_page("pages/login.py")
+        st.switch_page("pages/login.py")
         st.stop()
     return dict(user)
