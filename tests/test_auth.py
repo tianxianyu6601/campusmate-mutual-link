@@ -150,6 +150,7 @@ class AuthTests(unittest.TestCase):
         self.assertEqual("https://api.resend.com/emails", captured["url"])
         self.assertEqual(30, captured["timeout"])
         self.assertEqual("Bearer re_123456789", captured["headers"]["Authorization"])
+        self.assertEqual(auth.MAIL_USER_AGENT, captured["headers"]["User-agent"])
         self.assertEqual("CampusMate <notify@example.org>", captured["payload"]["from"])
         self.assertEqual(["receiver@example.com"], captured["payload"]["to"])
         self.assertEqual("Subject", captured["payload"]["subject"])
@@ -193,6 +194,7 @@ class AuthTests(unittest.TestCase):
         self.assertEqual("https://api.sendgrid.com/v3/mail/send", captured["url"])
         self.assertEqual(30, captured["timeout"])
         self.assertEqual("Bearer SG.123456789", captured["headers"]["Authorization"])
+        self.assertEqual(auth.MAIL_USER_AGENT, captured["headers"]["User-agent"])
         self.assertEqual(
             [{"to": [{"email": "receiver@example.com"}]}],
             captured["payload"]["personalizations"],

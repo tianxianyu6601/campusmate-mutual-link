@@ -25,7 +25,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DB_PATH = PROJECT_ROOT / "campusmate_app.db"
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 CODE_TTL_SECONDS = 10 * 60
-MAIL_SYSTEM_VERSION = "mail-auto-fallback-2026-08-07-3"
+MAIL_SYSTEM_VERSION = "mail-auto-fallback-2026-08-08-1"
+MAIL_USER_AGENT = "CampusMate/1.0 (Streamlit Cloud; mail verification)"
 SMTP_CLOUD_FAILURE_ADVICE = (
     "如果你在 Streamlit Cloud 上使用 QQ 邮箱并看到 Connection unexpectedly closed，"
     "通常是云服务器到 QQ SMTP 的连接被服务端断开。代码无法绕过这个外部限制；"
@@ -260,6 +261,7 @@ def _send_email_resend(to_email: str, subject: str, body: str) -> None:
         headers={
             "Authorization": f"Bearer {config['api_key']}",
             "Content-Type": "application/json",
+            "User-Agent": MAIL_USER_AGENT,
         },
     )
     try:
@@ -297,6 +299,7 @@ def _send_email_sendgrid(to_email: str, subject: str, body: str) -> None:
         headers={
             "Authorization": f"Bearer {config['api_key']}",
             "Content-Type": "application/json",
+            "User-Agent": MAIL_USER_AGENT,
         },
     )
     try:
