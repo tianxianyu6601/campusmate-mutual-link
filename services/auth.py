@@ -25,6 +25,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DB_PATH = PROJECT_ROOT / "campusmate_app.db"
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 CODE_TTL_SECONDS = 10 * 60
+MAIL_SYSTEM_VERSION = "mail-auto-fallback-2026-08-07-2"
 
 
 class AuthError(RuntimeError):
@@ -444,6 +445,7 @@ def diagnose_mail_service(to_email: str) -> list[str]:
     normalized = normalize_email(to_email)
     report: list[str] = []
     providers = _mail_provider_order()
+    report.append(f"邮件系统版本：{MAIL_SYSTEM_VERSION}")
     report.append(f"当前邮件通道：{' -> '.join(providers)}")
     for provider in providers:
         if provider == "sendgrid":
@@ -486,7 +488,11 @@ def _diagnose_resend(normalized_email: str, report: list[str]) -> None:
 
 
 def _diagnose_smtp(normalized_email: str, report: list[str]) -> None:
-    config = _smtp_config()
+    try:
+        config = _smtp_config()
+    except (AuthError, MailNotConfigured) as error:
+        report.append(f"SMTP 自检跳过：{error}")
+        return
     report.append(f"SMTP host：{config['host']}")
     report.append(f"SMTP username：{config['username']}")
     for attempt in _smtp_attempts(config):

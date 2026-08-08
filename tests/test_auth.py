@@ -220,6 +220,26 @@ class AuthTests(unittest.TestCase):
 
         self.assertEqual(["sendgrid", "smtp:465"], calls)
 
+    def test_mail_diagnostic_includes_version_and_provider_order(self) -> None:
+        with (
+            patch(
+                "services.auth.st.secrets",
+                {
+                    "mail_provider": "auto",
+                    "sendgrid": {
+                        "api_key": "SG.123456789",
+                        "from_email": "sender@example.org",
+                        "from_name": "CampusMate",
+                    },
+                },
+            ),
+            patch("services.auth._send_email_sendgrid"),
+        ):
+            report = auth.diagnose_mail_service("receiver@example.com")
+
+        self.assertIn(f"邮件系统版本：{auth.MAIL_SYSTEM_VERSION}", report)
+        self.assertIn("当前邮件通道：sendgrid -> smtp", report)
+
 
 if __name__ == "__main__":
     unittest.main()
