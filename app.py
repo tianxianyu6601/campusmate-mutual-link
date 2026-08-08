@@ -162,6 +162,15 @@ st.markdown(
       #MainMenu {
         display: none !important;
       }
+      [data-testid="stDialog"] {
+        left: 50% !important;
+        margin: 0 !important;
+        max-height: calc(100vh - 3rem) !important;
+        overflow-y: auto !important;
+        position: fixed !important;
+        top: 50% !important;
+        transform: translate(-50%, -50%) !important;
+      }
       div[class*="st-key-top_right_settings"] {
         position: fixed !important;
         right: 1.25rem !important;
