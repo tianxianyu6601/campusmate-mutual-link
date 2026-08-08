@@ -319,7 +319,7 @@ if is_authenticated:
                     if isinstance(default_value, dict)
                     else default_value
                 )
-            st.rerun()
+            st.switch_page("pages/login.py")
 
         with st.expander("重置密码"):
             st.caption("验证码会发送到当前登录邮箱。")
