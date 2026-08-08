@@ -89,6 +89,47 @@ def _inject_login_shell_css() -> None:
     )
 
 
+def _logout() -> None:
+    for key, default_value in DEFAULT_SESSION_STATE.items():
+        st.session_state[key] = (
+            default_value.copy()
+            if isinstance(default_value, dict)
+            else default_value
+        )
+    st.switch_page("pages/login.py")
+
+
+@st.dialog("重置密码")
+def _reset_password_dialog(current_email: str) -> None:
+    st.caption(f"验证码会发送到当前登录邮箱：{current_email}")
+    if st.button("发送重置验证码", key="dialog_send_reset_code"):
+        try:
+            debug_code = send_password_reset_code(current_email)
+            if debug_code:
+                st.warning(f"课程演示验证码：{debug_code}")
+            else:
+                st.success("重置验证码已发送，请检查邮箱和垃圾箱。")
+        except AuthError as error:
+            st.error(str(error))
+
+    with st.form("dialog_reset_password_form"):
+        reset_code = st.text_input("验证码", max_chars=6)
+        new_password = st.text_input("新密码", type="password")
+        confirm_password = st.text_input("确认新密码", type="password")
+        submitted = st.form_submit_button("确认重置")
+
+    if submitted:
+        if new_password != confirm_password:
+            st.error("两次输入的密码不一致。")
+        else:
+            try:
+                reset_password(current_email, reset_code, new_password)
+            except AuthError as error:
+                st.error(str(error))
+            else:
+                st.success("密码已重置。")
+
+
 st.set_page_config(
     page_title="CampusMate",
     page_icon="🤝",
@@ -312,44 +353,14 @@ if is_authenticated:
         st.markdown("## 🤝 CampusMate")
         user = st.session_state.auth_user
         st.success(f"已登录：{user['email']}")
-        if st.button("退出登录"):
-            for key, default_value in DEFAULT_SESSION_STATE.items():
-                st.session_state[key] = (
-                    default_value.copy()
-                    if isinstance(default_value, dict)
-                    else default_value
-                )
-            st.switch_page("pages/login.py")
-
-        with st.expander("重置密码"):
-            st.caption("验证码会发送到当前登录邮箱。")
-            current_email = str(user["email"])
-            if st.button("发送重置验证码", key="sidebar_send_reset_code"):
-                try:
-                    debug_code = send_password_reset_code(current_email)
-                    if debug_code:
-                        st.warning(f"课程演示验证码：{debug_code}")
-                    else:
-                        st.success("重置验证码已发送，请检查邮箱和垃圾箱。")
-                except AuthError as error:
-                    st.error(str(error))
-
-            with st.form("sidebar_reset_password_form"):
-                reset_code = st.text_input("验证码", max_chars=6)
-                new_password = st.text_input("新密码", type="password")
-                confirm_password = st.text_input("确认新密码", type="password")
-                submitted = st.form_submit_button("确认重置")
-
-            if submitted:
-                if new_password != confirm_password:
-                    st.error("两次输入的密码不一致。")
-                else:
-                    try:
-                        reset_password(current_email, reset_code, new_password)
-                    except AuthError as error:
-                        st.error(str(error))
-                    else:
-                        st.success("密码已重置。")
+        current_email = str(user["email"])
+        reset_col, logout_col = st.columns(2)
+        with reset_col:
+            if st.button("重置密码", key="open_reset_password_dialog"):
+                _reset_password_dialog(current_email)
+        with logout_col:
+            if st.button("退出登录", key="logout_button"):
+                _logout()
 
         st.page_link(
             "pages/home.py",
