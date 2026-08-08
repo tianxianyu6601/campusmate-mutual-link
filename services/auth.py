@@ -25,7 +25,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DB_PATH = PROJECT_ROOT / "campusmate_app.db"
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 CODE_TTL_SECONDS = 10 * 60
-MAIL_SYSTEM_VERSION = "mail-auto-fallback-2026-08-08-1"
+MAIL_SYSTEM_VERSION = "mail-auto-fallback-2026-08-08-2"
 MAIL_USER_AGENT = "CampusMate/1.0 (Streamlit Cloud; mail verification)"
 SMTP_CLOUD_FAILURE_ADVICE = (
     "如果你在 Streamlit Cloud 上使用 QQ 邮箱并看到 Connection unexpectedly closed，"
@@ -568,30 +568,56 @@ def send_verification_code(email: str) -> str | None:
     return None
 
 
+def send_password_reset_code(email: str) -> str | None:
+    normalized = normalize_email(email)
+    if not account_exists(normalized):
+        raise AuthError("该邮箱尚未注册")
+    code = create_verification_code(normalized)
+    body = (
+        "你正在重置 CampusMate 登录密码。\n\n"
+        f"你的密码重置验证码是：{code}\n"
+        "验证码 10 分钟内有效。如果不是你本人操作，请忽略这封邮件。"
+    )
+    try:
+        send_email(normalized, "CampusMate 密码重置验证码", body)
+    except MailNotConfigured:
+        return code
+    except AuthError:
+        raise
+    except (OSError, smtplib.SMTPException, UnicodeEncodeError) as error:
+        raise AuthError(f"密码重置邮件发送失败：{error}") from error
+    return None
+
+
+def _consume_verification_code(connection: sqlite3.Connection, email: str, code: str) -> None:
+    row = connection.execute(
+        "SELECT code_hash, expires_at, attempts FROM verification_codes WHERE email = ?",
+        (email,),
+    ).fetchone()
+    if row is None:
+        raise AuthError("请先发送邮箱验证码")
+    if int(row["expires_at"]) < int(time.time()):
+        raise AuthError("验证码已过期，请重新发送")
+    if int(row["attempts"]) >= 5:
+        raise AuthError("验证码尝试次数过多，请重新发送")
+    if not hmac.compare_digest(str(row["code_hash"]), _hash_code(code.strip())):
+        connection.execute(
+            "UPDATE verification_codes SET attempts = attempts + 1 WHERE email = ?",
+            (email,),
+        )
+        raise AuthError("验证码不正确")
+    connection.execute("DELETE FROM verification_codes WHERE email = ?", (email,))
+
+
 def register_user(email: str, password: str, code: str) -> dict[str, str]:
     normalized = normalize_email(email)
     if len(password) < 6:
         raise AuthError("密码至少需要 6 位")
     init_db()
     with _db() as connection:
-        row = connection.execute(
-            "SELECT code_hash, expires_at, attempts FROM verification_codes WHERE email = ?",
-            (normalized,),
-        ).fetchone()
-        if row is None:
-            raise AuthError("请先发送邮箱验证码")
-        if int(row["expires_at"]) < int(time.time()):
-            raise AuthError("验证码已过期，请重新发送")
-        if int(row["attempts"]) >= 5:
-            raise AuthError("验证码尝试次数过多，请重新发送")
-        if not hmac.compare_digest(str(row["code_hash"]), _hash_code(code.strip())):
-            connection.execute(
-                "UPDATE verification_codes SET attempts = attempts + 1 WHERE email = ?",
-                (normalized,),
-            )
-            raise AuthError("验证码不正确")
         if account_exists(normalized):
             raise AuthError("该邮箱已经注册，请直接登录")
+        _consume_verification_code(connection, normalized, code)
         salt = secrets.token_hex(16)
         user_id = _next_user_id(connection)
         connection.execute(
@@ -601,8 +627,30 @@ def register_user(email: str, password: str, code: str) -> dict[str, str]:
             """,
             (normalized, user_id, _hash_password(password, salt), salt, int(time.time())),
         )
-        connection.execute("DELETE FROM verification_codes WHERE email = ?", (normalized,))
     return {"email": normalized, "user_id": user_id}
+
+
+def reset_password(email: str, code: str, new_password: str) -> None:
+    normalized = normalize_email(email)
+    if len(new_password) < 6:
+        raise AuthError("密码至少需要 6 位")
+    init_db()
+    with _db() as connection:
+        row = connection.execute(
+            "SELECT 1 FROM users WHERE email = ?", (normalized,)
+        ).fetchone()
+        if row is None:
+            raise AuthError("该邮箱尚未注册")
+        _consume_verification_code(connection, normalized, code)
+        salt = secrets.token_hex(16)
+        connection.execute(
+            """
+            UPDATE users
+            SET password_hash = ?, salt = ?, verified = 1
+            WHERE email = ?
+            """,
+            (_hash_password(new_password, salt), salt, normalized),
+        )
 
 
 def authenticate(email: str, password: str) -> dict[str, str]:

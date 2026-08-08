@@ -35,6 +35,22 @@ class AuthTests(unittest.TestCase):
         with self.assertRaises(auth.AuthError):
             auth.authenticate("person@example.com", "wrong-password")
 
+    def test_password_reset_updates_login_password(self) -> None:
+        register_code = auth.send_verification_code("person@example.com")
+        auth.register_user("person@example.com", "password123", str(register_code))
+
+        reset_code = auth.send_password_reset_code("person@example.com")
+        auth.reset_password("person@example.com", str(reset_code), "newpass123")
+
+        with self.assertRaises(auth.AuthError):
+            auth.authenticate("person@example.com", "password123")
+        user = auth.authenticate("person@example.com", "newpass123")
+        self.assertEqual("person@example.com", user["email"])
+
+    def test_password_reset_code_requires_registered_email(self) -> None:
+        with self.assertRaisesRegex(auth.AuthError, "尚未注册"):
+            auth.send_password_reset_code("missing@example.com")
+
     def test_smtp_placeholder_is_rejected_before_login(self) -> None:
         with patch(
             "services.auth.st.secrets",

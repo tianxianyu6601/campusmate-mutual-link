@@ -11,6 +11,8 @@ from services.auth import (
     diagnose_mail_service,
     init_db,
     register_user,
+    reset_password,
+    send_password_reset_code,
     send_verification_code,
 )
 
@@ -106,7 +108,7 @@ with st.container(key="login_shell"):
 
         mode = st.segmented_control(
             "选择操作",
-            ["登录", "注册"],
+            ["登录", "注册", "重置密码"],
             key="login_mode",
             label_visibility="collapsed",
         )
@@ -129,7 +131,11 @@ with st.container(key="login_shell"):
                 else:
                     st.switch_page("pages/home.py")
 
-        else:
+            if st.button("忘记密码？点击重置"):
+                st.session_state.login_mode_next = "重置密码"
+                st.rerun()
+
+        elif mode == "注册":
             register_email = st.text_input(
                 "邮箱",
                 key="register_email",
@@ -181,4 +187,46 @@ with st.container(key="login_shell"):
                     else:
                         st.session_state.login_mode_next = "登录"
                         st.session_state.login_notice = "注册成功，请输入密码登录。"
+                        st.rerun()
+
+        else:
+            reset_email = st.text_input(
+                "注册邮箱",
+                key="reset_email",
+                placeholder="your.name@pku.edu.cn / your.name@example.com",
+            )
+            if st.button("向邮箱发送重置验证码"):
+                try:
+                    debug_code = send_password_reset_code(reset_email)
+                    if debug_code:
+                        st.warning(
+                            "线上邮件服务尚未配置，暂时无法真实发到邮箱。"
+                            f"课程演示验证码：{debug_code}"
+                        )
+                    else:
+                        st.success("重置验证码已发送，请检查邮箱和垃圾箱。")
+                except AuthError as error:
+                    st.error(str(error))
+
+            with st.form("reset_form"):
+                code = st.text_input("验证码", max_chars=6, key="reset_code")
+                password = st.text_input(
+                    "设置新密码", type="password", key="reset_password"
+                )
+                confirm = st.text_input(
+                    "确认新密码", type="password", key="reset_confirm"
+                )
+                submitted = st.form_submit_button("确认重置密码", type="primary")
+
+            if submitted:
+                if password != confirm:
+                    st.error("两次输入的密码不一致。")
+                else:
+                    try:
+                        reset_password(reset_email, code, password)
+                    except AuthError as error:
+                        st.error(str(error))
+                    else:
+                        st.session_state.login_mode_next = "登录"
+                        st.session_state.login_notice = "密码已重置，请使用新密码登录。"
                         st.rerun()

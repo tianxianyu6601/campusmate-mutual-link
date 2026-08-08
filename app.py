@@ -15,6 +15,7 @@ from typing import Any
 
 import streamlit as st
 
+from services.auth import AuthError, reset_password, send_password_reset_code
 from services.i18n import CHINESE
 
 
@@ -319,6 +320,37 @@ if is_authenticated:
                     else default_value
                 )
             st.rerun()
+
+        with st.expander("重置密码"):
+            st.caption("验证码会发送到当前登录邮箱。")
+            current_email = str(user["email"])
+            if st.button("发送重置验证码", key="sidebar_send_reset_code"):
+                try:
+                    debug_code = send_password_reset_code(current_email)
+                    if debug_code:
+                        st.warning(f"课程演示验证码：{debug_code}")
+                    else:
+                        st.success("重置验证码已发送，请检查邮箱和垃圾箱。")
+                except AuthError as error:
+                    st.error(str(error))
+
+            with st.form("sidebar_reset_password_form"):
+                reset_code = st.text_input("验证码", max_chars=6)
+                new_password = st.text_input("新密码", type="password")
+                confirm_password = st.text_input("确认新密码", type="password")
+                submitted = st.form_submit_button("确认重置")
+
+            if submitted:
+                if new_password != confirm_password:
+                    st.error("两次输入的密码不一致。")
+                else:
+                    try:
+                        reset_password(current_email, reset_code, new_password)
+                    except AuthError as error:
+                        st.error(str(error))
+                    else:
+                        st.success("密码已重置。")
+
         st.page_link(
             "pages/home.py",
             label="首页",
