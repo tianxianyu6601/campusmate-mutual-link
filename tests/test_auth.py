@@ -88,6 +88,31 @@ class AuthTests(unittest.TestCase):
 
         self.assertEqual([(465, True, False), (587, False, True)], calls)
 
+    def test_qq_smtp_cloud_disconnect_points_to_https_provider(self) -> None:
+        def fake_send_once(config, attempt, message) -> None:
+            raise smtplib.SMTPServerDisconnected("Connection unexpectedly closed")
+
+        with (
+            patch(
+                "services.auth.st.secrets",
+                {
+                    "mail_provider": "smtp",
+                    "smtp": {
+                        "host": "smtp.qq.com",
+                        "port": 465,
+                        "username": "123456789@qq.com",
+                        "password": "abcdefghijklmnop",
+                        "from_email": "123456789@qq.com",
+                        "use_ssl": True,
+                        "use_tls": False,
+                    },
+                },
+            ),
+            patch("services.auth._send_email_once", side_effect=fake_send_once),
+        ):
+            with self.assertRaisesRegex(auth.AuthError, "SendGrid"):
+                auth.send_email("receiver@example.com", "Subject", "Body")
+
     def test_resend_provider_posts_email_api_request(self) -> None:
         class FakeResponse:
             status = 200

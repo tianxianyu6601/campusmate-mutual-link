@@ -25,7 +25,12 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DB_PATH = PROJECT_ROOT / "campusmate_app.db"
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 CODE_TTL_SECONDS = 10 * 60
-MAIL_SYSTEM_VERSION = "mail-auto-fallback-2026-08-07-2"
+MAIL_SYSTEM_VERSION = "mail-auto-fallback-2026-08-07-3"
+SMTP_CLOUD_FAILURE_ADVICE = (
+    "如果你在 Streamlit Cloud 上使用 QQ 邮箱并看到 Connection unexpectedly closed，"
+    "通常是云服务器到 QQ SMTP 的连接被服务端断开。代码无法绕过这个外部限制；"
+    "建议改用 SendGrid 这类 HTTPS 邮件通道，或换一个明确允许云服务器 SMTP 登录的发件邮箱服务。"
+)
 
 
 class AuthError(RuntimeError):
@@ -355,6 +360,19 @@ def _describe_attempt(attempt: Mapping[str, Any]) -> str:
     return f"{attempt['host']}:{attempt['port']} {mode}"
 
 
+def _smtp_failure_message(
+    config: Mapping[str, Any], smtp_failures: list[str]
+) -> str:
+    message = "SMTP 服务器断开或连接失败。"
+    if smtp_failures:
+        message += f"已尝试：{'；'.join(smtp_failures)}"
+    host = str(config.get("host", "")).lower()
+    combined = " ".join(smtp_failures).lower()
+    if host == "smtp.qq.com" or "connection unexpectedly closed" in combined:
+        message += f" {SMTP_CLOUD_FAILURE_ADVICE}"
+    return message
+
+
 def _send_email_once(
     config: Mapping[str, Any],
     attempt: Mapping[str, Any],
@@ -415,10 +433,7 @@ def send_email(to_email: str, subject: str, body: str) -> None:
                     ) from error
                 except (OSError, smtplib.SMTPException, TimeoutError) as error:
                     smtp_failures.append(f"{_describe_attempt(attempt)} -> {error}")
-            raise AuthError(
-                "SMTP 服务器断开或连接失败。"
-                f"已尝试：{'；'.join(smtp_failures)}"
-            )
+            raise AuthError(_smtp_failure_message(config, smtp_failures))
         except MailNotConfigured as error:
             missing_provider_count += 1
             failures.append(f"{provider}: {error}")

@@ -214,7 +214,39 @@ streamlit run app.py
 
 终端出现 `Local URL` 后在浏览器打开。当前可使用首页和问卷页；`matching.py` 与 `result.py` 创建后，`app.py` 会自动把它们加入导航。
 
-### 3. 停止应用
+### 3. Streamlit Cloud 邮件验证码配置
+
+验证码邮件必须由一个“发件账号”或第三方邮件服务代发。用户输入的邮箱只是收件人邮箱，不能直接承担发信功能。
+
+云端部署更推荐 SendGrid，因为它通过 HTTPS API 发信，不依赖云服务器连接 QQ SMTP：
+
+```toml
+mail_provider = "sendgrid"
+
+[sendgrid]
+api_key = "SG.xxxxxxxxxxxxxxxxx"
+from_email = "已经在 SendGrid 验证通过的发件邮箱"
+from_name = "CampusMate"
+```
+
+如果使用 QQ 邮箱 SMTP，则需要先在 QQ 邮箱网页版开启 SMTP 服务并生成 16 位授权码。这里的 `password` 不是 QQ 登录密码：
+
+```toml
+mail_provider = "smtp"
+
+[smtp]
+host = "smtp.qq.com"
+port = 465
+username = "真实QQ邮箱@qq.com"
+password = "16位QQ邮箱SMTP授权码"
+from_email = "真实QQ邮箱@qq.com"
+use_tls = false
+use_ssl = true
+```
+
+如果在 Streamlit Cloud 上使用 QQ 邮箱出现 `Connection unexpectedly closed`，通常是 QQ SMTP 服务端断开了云服务器连接。此时应改用 SendGrid，或换一个明确允许云服务器 SMTP 登录的发件邮箱服务。
+
+### 4. 停止应用
 
 回到运行 Streamlit 的终端，按：
 
