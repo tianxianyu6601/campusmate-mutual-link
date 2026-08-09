@@ -19,6 +19,13 @@ jobs:
       CAMPUSMATE_SENDGRID_API_KEY: ${{ secrets.CAMPUSMATE_SENDGRID_API_KEY }}
     steps:
       - uses: actions/checkout@v4
+      - name: Check database secret
+        shell: bash
+        run: |
+          if [ -z "$CAMPUSMATE_DATABASE_URL" ]; then
+            echo "::error::Please add the repository secret CAMPUSMATE_DATABASE_URL."
+            exit 1
+          fi
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

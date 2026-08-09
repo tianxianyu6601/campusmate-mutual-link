@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 import streamlit as st
 
 from services.auth import require_login
+from services.email_tasks import process_email_tasks
 from services.platform_service import (
     ServiceError,
     enroll_in_match_round,
@@ -66,6 +67,12 @@ st.write(
 
 try:
     cycle = ensure_cycle_match_round(email)
+    if cycle.get("finalized"):
+        try:
+            process_email_tasks(limit=20)
+        except Exception:
+            # Results are already committed; the durable outbox retries later.
+            pass
     overview = get_cycle_match_overview(email)
 except ServiceError as error:
     st.error(str(error))
