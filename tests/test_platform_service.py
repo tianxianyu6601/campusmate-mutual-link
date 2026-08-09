@@ -182,29 +182,42 @@ class PlatformServiceTests(unittest.TestCase):
             "capacity": 3,
             "sqlite_path": self.database,
         }
-        with self.assertRaisesRegex(ValidationError, "至少一项"):
-            create_activity("owner@example.com", **activity_values)
+        with self.assertRaisesRegex(ValidationError, "本次活动公开联系方式"):
+            create_activity("owner@example.com", organizer_contact="", **activity_values)
 
         draft_id = create_activity(
-            "owner@example.com", status="draft", **activity_values
+            "owner@example.com", status="draft", organizer_contact="", **activity_values
         )
-        with self.assertRaisesRegex(ValidationError, "至少一项"):
+        with self.assertRaisesRegex(ValidationError, "本次活动公开联系方式"):
             publish_activity(draft_id, "owner@example.com", sqlite_path=self.database)
 
-        upsert_profile(
+        published_id = create_activity(
             "owner@example.com",
-            {"display_name": "发起人", "contact_wechat": "campusmate_owner"},
-            sqlite_path=self.database,
+            organizer_contact="微信：campusmate_owner",
+            **activity_values,
         )
-        publish_activity(draft_id, "owner@example.com", sqlite_path=self.database)
+        detail = get_activity(
+            published_id, "member1@example.com", sqlite_path=self.database
+        )
+        self.assertEqual("微信：campusmate_owner", detail["organizer_contact"])
 
-        upsert_profile(
+        with self.assertRaisesRegex(ValidationError, "本次申请联系方式"):
+            apply_to_activity(
+                published_id,
+                "member1@example.com",
+                applicant_contact="",
+                sqlite_path=self.database,
+            )
+        apply_to_activity(
+            published_id,
             "member1@example.com",
-            {"display_name": "申请人"},
+            applicant_contact="QQ：123456",
             sqlite_path=self.database,
         )
-        with self.assertRaisesRegex(ValidationError, "至少一项"):
-            apply_to_activity(draft_id, "member1@example.com", sqlite_path=self.database)
+        applications = list_activity_applications(
+            published_id, "owner@example.com", sqlite_path=self.database
+        )
+        self.assertEqual("QQ：123456", applications[0]["applicant_contact"])
 
     def test_avatar_validation_accepts_small_image_and_rejects_invalid_data(self) -> None:
         avatar_bytes = b"\x89PNG\r\n\x1a\n" + b"small-image"
@@ -358,6 +371,7 @@ class PlatformServiceTests(unittest.TestCase):
             location_text="理科一号楼",
             capacity=4,
             status="draft",
+            organizer_contact="邮箱：owner@example.com",
             sqlite_path=self.database,
         )
         self.assertEqual(

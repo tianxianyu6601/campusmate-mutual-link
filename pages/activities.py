@@ -363,6 +363,10 @@ def _render_organizer_workflow(activity: dict[str, Any], email: str) -> None:
                 st.markdown(f"**{name}**")
                 st.badge("待审核", color="orange")
             st.write(str(application.get("reason") or "未填写申请说明"))
+            st.info(
+                f"申请联系方式：{application.get('applicant_contact') or '未填写'}",
+                icon=":material/contact_mail:",
+            )
             with st.container(horizontal=True):
                 if st.button(
                     "查看资料",
@@ -415,7 +419,8 @@ def _render_organizer_workflow(activity: dict[str, Any], email: str) -> None:
                 status_label = APPLICATION_STATUS_LABELS.get(
                     str(application["status"]), str(application["status"])
                 )
-                st.write(f"{name} · {status_label}")
+                contact = str(application.get("applicant_contact") or "未填写")
+                st.write(f"{name} · {status_label} · 联系方式：{contact}")
 
 
 def _render_participation(activity: dict[str, Any], email: str) -> None:
@@ -452,6 +457,12 @@ def _render_participation(activity: dict[str, Any], email: str) -> None:
     if application_status == "withdrawn":
         st.caption("你已撤回此前的申请，可以重新提交。")
     with st.form(f"activity_application_{activity_id}"):
+        applicant_contact = st.text_input(
+            "本次申请联系方式*",
+            max_chars=160,
+            placeholder="例如：微信 campusmate / QQ 123456 / 邮箱 name@example.com",
+            help="提交后会直接展示给活动发起人，用于审核和后续联系。",
+        )
         reason = st.text_area(
             "申请说明",
             max_chars=500,
@@ -464,7 +475,12 @@ def _render_participation(activity: dict[str, Any], email: str) -> None:
         )
     if submitted:
         try:
-            apply_to_activity(activity_id, email, reason=reason)
+            apply_to_activity(
+                activity_id,
+                email,
+                reason=reason,
+                applicant_contact=applicant_contact,
+            )
         except ServiceError as error:
             st.error(str(error))
         else:
@@ -546,6 +562,15 @@ def _render_detail(activity_id: str, email: str) -> None:
     )
     if activity.get("ends_at"):
         st.caption(f"预计结束：{_format_time(int(activity['ends_at']))}")
+
+    organizer_contact = str(activity.get("organizer_contact") or "").strip()
+    if organizer_contact:
+        st.info(
+            f"发起人公开联系方式：{organizer_contact}",
+            icon=":material/contact_phone:",
+        )
+    elif activity["is_organizer"]:
+        st.warning("请编辑活动并补充本次活动公开联系方式。")
 
     with st.container(border=True):
         st.subheader("活动介绍")
@@ -785,6 +810,13 @@ def _render_activity_form(email: str, existing: dict[str, Any] | None = None) ->
             value=bool(existing.get("approval_required", True)) if existing else True,
         )
         st.caption("勾选后由你逐一审核；不勾选时，未满员用户可直接加入。")
+        organizer_contact = st.text_input(
+            "本次活动公开联系方式*",
+            value=str(existing.get("organizer_contact", "")) if existing else "",
+            max_chars=160,
+            placeholder="例如：微信 campusmate / QQ 123456 / 邮箱 name@example.com",
+            help="活动发布后会直接展示在详情页，所有能看到活动的登录用户都能看到。",
+        )
 
         with st.container(horizontal=True, horizontal_alignment="right"):
             save_draft = st.form_submit_button(
@@ -839,6 +871,7 @@ def _render_activity_form(email: str, existing: dict[str, Any] | None = None) ->
                 visibility=visibility,
                 approval_required=approval_required,
                 status=requested_status,
+                organizer_contact=organizer_contact,
                 expected_version=int(existing["version"]),
             )
             activity_id = str(existing["activity_id"])
@@ -857,6 +890,7 @@ def _render_activity_form(email: str, existing: dict[str, Any] | None = None) ->
                 visibility=visibility,
                 approval_required=approval_required,
                 status=requested_status,
+                organizer_contact=organizer_contact,
             )
     except ServiceError as error:
         st.error(str(error))

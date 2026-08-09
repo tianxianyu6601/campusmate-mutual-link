@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import time
-
 import streamlit as st
 
 from services.auth import (
@@ -17,7 +15,6 @@ from services.auth import (
     send_password_reset_code,
     send_verification_code,
     start_persistent_session,
-    write_session_cookie,
 )
 
 
@@ -128,18 +125,24 @@ with st.container(key="login_shell"):
                 submitted = st.form_submit_button("登录", type="primary")
 
             if submitted:
-                try:
-                    user = authenticate(email, password)
-                    st.session_state.auth_user = user
-                    token = start_persistent_session(user)
-                except AuthError as error:
-                    st.error(str(error))
-                else:
-                    st.session_state["session_cookie_pending"] = token
-                    write_session_cookie(token)
-                    # Let the browser apply the cookie delta before this page is replaced.
-                    time.sleep(0.15)
-                    st.switch_page("pages/home.py")
+                with st.spinner("正在登录，请稍候…", show_time=True):
+                    try:
+                        user = authenticate(email, password)
+                        st.session_state.auth_user = user
+                        st.session_state["last_authenticated_route"] = "home"
+                        st.session_state["last_authenticated_query_params"] = {}
+                        token = start_persistent_session(user)
+                    except AuthError as error:
+                        st.error(str(error))
+                    else:
+                        # The authenticated shell writes the cookie once. Keeping
+                        # the component off this page avoids a duplicate iframe
+                        # handshake and makes one submit sufficient.
+                        st.session_state["session_cookie_pending"] = token
+                        # This run's navigation map contains only the public page.
+                        # A single automatic rerun rebuilds the authenticated map;
+                        # app.py then routes to /home without another user click.
+                        st.rerun()
 
             if st.button("忘记密码？点击重置"):
                 st.session_state.login_mode_next = "重置密码"

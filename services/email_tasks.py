@@ -23,10 +23,13 @@ def _render_email(template_key: str, payload: Mapping[str, Any]) -> tuple[str, s
     title = str(payload.get("activity_title") or "校园活动")
     applicant = str(payload.get("applicant_name") or "一位校园用户")
     reason = str(payload.get("reason") or "未填写申请说明")
+    applicant_contact = str(payload.get("applicant_contact") or "未填写")
     templates = {
         "activity_application_created": (
             "CampusMate：收到新的活动申请",
-            f"{applicant} 申请加入“{title}”。\n\n申请说明：{reason}\n\n请登录 CampusMate 处理申请。",
+            f"{applicant} 申请加入“{title}”。\n\n"
+            f"申请联系方式：{applicant_contact}\n申请说明：{reason}\n\n"
+            "请登录 CampusMate 处理申请。",
         ),
         "activity_application_approved": (
             "CampusMate：活动申请已通过",

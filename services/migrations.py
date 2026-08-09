@@ -332,12 +332,23 @@ PROFILE_CONTACT_SCHEMA = Migration(
 )
 
 
+ACTIVITY_CONTACT_SCHEMA = Migration(
+    version=6,
+    name="activity_contact_schema",
+    statements=(
+        "ALTER TABLE activities ADD COLUMN organizer_contact TEXT NOT NULL DEFAULT ''",
+        "ALTER TABLE activity_applications ADD COLUMN applicant_contact TEXT NOT NULL DEFAULT ''",
+    ),
+)
+
+
 MIGRATIONS = (
     BASE_SCHEMA,
     UNIFIED_PLATFORM_SCHEMA,
     PROFILE_EXPERIENCE_SCHEMA,
     ACTIVITY_WORKFLOW_SCHEMA,
     PROFILE_CONTACT_SCHEMA,
+    ACTIVITY_CONTACT_SCHEMA,
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version
 _MIGRATION_CACHE: set[tuple[str, str]] = set()

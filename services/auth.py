@@ -184,6 +184,8 @@ def write_session_cookie(token: str) -> None:
             secure=_browser_uses_https(),
             same_site="strict",
         )
+        if isinstance(getattr(cookie_manager, "cookies", None), dict):
+            cookie_manager.cookies[SESSION_COOKIE_NAME] = str(token)
         return
 
     token_json = json.dumps(str(token))
@@ -215,6 +217,8 @@ def clear_session_cookie() -> None:
                 SESSION_COOKIE_NAME,
                 key="campusmate_cookie_delete",
             )
+        if isinstance(getattr(cookie_manager, "cookies", None), dict):
+            cookie_manager.cookies.pop(SESSION_COOKIE_NAME, None)
         return
 
     name_json = json.dumps(SESSION_COOKIE_NAME)

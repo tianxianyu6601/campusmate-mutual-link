@@ -10,7 +10,6 @@ Individual pages consume the stable interfaces delivered by Part 1.
 
 from __future__ import annotations
 
-import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -70,13 +69,17 @@ def _initialise_session_state() -> None:
 def _available_pages(is_authenticated: bool) -> list[st.Page]:
     """Build the public login route and authenticated CampusMate page map."""
 
+    login_page = st.Page(
+        "pages/login.py",
+        title="登录",
+        icon="🔐",
+        default=True,
+    )
+    if not is_authenticated:
+        return [login_page]
+
     pages = [
-        st.Page(
-            "pages/login.py",
-            title="登录",
-            icon="🔐",
-            default=True,
-        ),
+        login_page,
         st.Page(
             "pages/home.py",
             title="首页",
@@ -136,9 +139,6 @@ def _logout() -> None:
             else default_value
         )
     clear_session_cookie()
-    # Let the browser clear the cookie before the rerun removes this component.
-    time.sleep(0.15)
-    st.rerun()
 
 
 def _request_logout() -> None:
@@ -459,34 +459,39 @@ st.markdown(
 )
 
 _initialise_session_state()
-browser_cookies = cookie_component(
-    method="getAll",
-    key="campusmate_cookie_reader",
-    default=None,
-)
-if browser_cookies is None:
-    # Ensure getAll has a truthy result even in a brand-new browser. The
-    # component's frontend does not emit an empty cookie dictionary.
-    cookie_component(
-        method="set",
-        cookie="cm_cookie_ready",
-        value="1",
-        options={
-            "path": "/",
-            "expires": (datetime.now() + timedelta(days=30)).isoformat(),
-            "sameSite": "strict",
-        },
-        key="campusmate_cookie_bootstrap",
-        default=False,
+cookie_manager = st.session_state.get("_browser_cookie_manager")
+if cookie_manager is None:
+    browser_cookies = cookie_component(
+        method="getAll",
+        key="campusmate_cookie_reader",
+        default=None,
     )
-    st.stop()
-cookie_manager = object.__new__(stx.CookieManager)
-cookie_manager.cookie_manager = cookie_component
-cookie_manager.cookies = dict(browser_cookies)
-st.session_state["_browser_cookie_manager"] = cookie_manager
-if st.session_state.pop("logout_requested", False):
+    if browser_cookies is None:
+        # Ensure getAll has a truthy result even in a brand-new browser. The
+        # component's frontend does not emit an empty cookie dictionary.
+        cookie_component(
+            method="set",
+            cookie="cm_cookie_ready",
+            value="1",
+            options={
+                "path": "/",
+                "expires": (datetime.now() + timedelta(days=30)).isoformat(),
+                "sameSite": "strict",
+            },
+            key="campusmate_cookie_bootstrap",
+            default=False,
+        )
+        st.stop()
+    cookie_manager = object.__new__(stx.CookieManager)
+    cookie_manager.cookie_manager = cookie_component
+    cookie_manager.cookies = dict(browser_cookies)
+    st.session_state["_browser_cookie_manager"] = cookie_manager
+
+logged_out_now = st.session_state.pop("logout_requested", False)
+if logged_out_now:
     _logout()
-restore_persistent_session()
+else:
+    restore_persistent_session()
 
 is_authenticated = bool(st.session_state.get("auth_user"))
 available_pages = _available_pages(is_authenticated)
@@ -514,7 +519,6 @@ if is_authenticated:
         # Mount the writer once on the stable authenticated shell so the login
         # page can switch immediately without losing the component update.
         write_session_cookie(str(pending_cookie))
-    persist_current_session_state()
 
 if not is_authenticated:
     _inject_login_shell_css()
@@ -640,3 +644,9 @@ if is_authenticated:
             st.caption("部署操作会在对应平台中完成，不会修改本地问卷数据。")
 
 navigation.run()
+
+# Persist route and workflow state after the page has streamed its visible UI.
+# The database write no longer blocks the page transition or leaves stale UI
+# on screen while the new page is waiting to render.
+if is_authenticated:
+    persist_current_session_state()

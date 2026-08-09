@@ -758,20 +758,44 @@ def validate_profile_for_matching(
     return matching_profile_missing_fields(profile, interests)
 
 
-def _require_activity_contact(
+def _profile_contact_suggestion(
     connection: DatabaseConnection, email: str
-) -> dict[str, Any]:
-    """Require one saved contact method before publishing or joining an activity."""
+) -> str:
+    """Return a labelled saved contact for backward-compatible service callers."""
 
     profile = _load_profile(connection, email)
-    if profile is None or not any(
-        str(profile.get(field_name, "")).strip()
-        for field_name in ("contact_email", "contact_qq", "contact_wechat")
+    if profile is None:
+        return ""
+    for label, field_name in (
+        ("邮箱", "contact_email"),
+        ("QQ", "contact_qq"),
+        ("微信", "contact_wechat"),
     ):
-        raise ValidationError(
-            "发布或参加活动前，请先在个人资料中填写邮箱、QQ号或微信号中的至少一项"
-        )
-    return profile
+        value = str(profile.get(field_name, "")).strip()
+        if value:
+            return f"{label}：{value}"
+    return ""
+
+
+def _resolve_activity_contact(
+    connection: DatabaseConnection,
+    email: str,
+    provided: str | None,
+    *,
+    field_label: str,
+) -> str:
+    """Validate the contact copied into an activity or application record."""
+
+    clean_contact = (
+        _profile_contact_suggestion(connection, email)
+        if provided is None
+        else str(provided).strip()
+    )
+    if not clean_contact:
+        raise ValidationError(f"请填写{field_label}")
+    if len(clean_contact) > 160:
+        raise ValidationError(f"{field_label}不能超过 160 个字符")
+    return clean_contact
 
 
 def create_activity(
@@ -789,6 +813,7 @@ def create_activity(
     visibility: str = "campus",
     approval_required: bool = True,
     status: str = "published",
+    organizer_contact: str | None = None,
     sqlite_path: Path | None = None,
 ) -> str:
     path = _prepare_database(sqlite_path)
@@ -810,16 +835,22 @@ def create_activity(
     now = _now()
     with transaction(path, immediate=True) as connection:
         organizer = _require_user(connection, organizer_email)
-        if values["status"] == "published":
-            _require_activity_contact(connection, organizer)
+        clean_organizer_contact = ""
+        if values["status"] == "published" or str(organizer_contact or "").strip():
+            clean_organizer_contact = _resolve_activity_contact(
+                connection,
+                organizer,
+                organizer_contact,
+                field_label="本次活动公开联系方式",
+            )
         connection.execute(
             """
             INSERT INTO activities(
                 activity_id, organizer_email, category, custom_category, title,
                 description, image_url, starts_at, ends_at, location_text,
                 capacity, visibility, approval_required, status, version,
-                created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+                created_at, updated_at, organizer_contact
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
             """,
             (
                 activity_id,
@@ -838,6 +869,7 @@ def create_activity(
                 values["status"],
                 now,
                 now,
+                clean_organizer_contact,
             ),
         )
         connection.execute(
@@ -1044,6 +1076,7 @@ def update_activity(
     visibility: str = "campus",
     approval_required: bool = True,
     status: str | None = None,
+    organizer_contact: str | None = None,
     sqlite_path: Path | None = None,
 ) -> None:
     """Edit a draft or future published activity with optimistic version checks."""
@@ -1081,8 +1114,16 @@ def update_activity(
             visibility=visibility,
             status=requested_status,
         )
-        if values["status"] == "published":
-            _require_activity_contact(connection, organizer)
+        current_contact = str(row["organizer_contact"] or "").strip()
+        requested_contact = current_contact if organizer_contact is None else organizer_contact
+        clean_organizer_contact = ""
+        if values["status"] == "published" or str(requested_contact or "").strip():
+            clean_organizer_contact = _resolve_activity_contact(
+                connection,
+                organizer,
+                requested_contact,
+                field_label="本次活动公开联系方式",
+            )
         member_count = int(
             connection.execute(
                 "SELECT COUNT(*) AS count FROM activity_members WHERE activity_id = ?",
@@ -1097,7 +1138,7 @@ def update_activity(
                 category = ?, custom_category = ?, title = ?, description = ?,
                 image_url = ?, starts_at = ?, ends_at = ?, location_text = ?,
                 capacity = ?, visibility = ?, approval_required = ?, status = ?,
-                version = version + 1, updated_at = ?
+                organizer_contact = ?, version = version + 1, updated_at = ?
             WHERE activity_id = ?
             """,
             (
@@ -1105,7 +1146,7 @@ def update_activity(
                 values["description"], values["image_url"], values["starts_at"],
                 values["ends_at"], values["location_text"], values["capacity"],
                 values["visibility"], int(bool(approval_required)),
-                values["status"], now, activity_id,
+                values["status"], clean_organizer_contact, now, activity_id,
             ),
         )
         _audit(
@@ -1140,7 +1181,12 @@ def publish_activity(
             raise ConflictError("只有草稿可以发布")
         if int(row["starts_at"]) < now - 60:
             raise ValidationError("请先把活动开始时间调整到未来")
-        _require_activity_contact(connection, organizer)
+        _resolve_activity_contact(
+            connection,
+            organizer,
+            str(row["organizer_contact"] or ""),
+            field_label="本次活动公开联系方式",
+        )
         connection.execute(
             "UPDATE activities SET status = 'published', version = version + 1, updated_at = ? WHERE activity_id = ?",
             (now, activity_id),
@@ -1192,6 +1238,7 @@ def apply_to_activity(
     applicant_email: str,
     *,
     reason: str = "",
+    applicant_contact: str | None = None,
     sqlite_path: Path | None = None,
 ) -> str:
     path = _prepare_database(sqlite_path)
@@ -1201,7 +1248,12 @@ def apply_to_activity(
     now = _now()
     with transaction(path, immediate=True) as connection:
         applicant = _require_user(connection, applicant_email)
-        _require_activity_contact(connection, applicant)
+        clean_applicant_contact = _resolve_activity_contact(
+            connection,
+            applicant,
+            applicant_contact,
+            field_label="本次申请联系方式",
+        )
         activity = connection.execute(
             connection.select_for_update("SELECT * FROM activities WHERE activity_id = ?"),
             (activity_id,),
@@ -1235,11 +1287,11 @@ def apply_to_activity(
             connection.execute(
                 """
                 UPDATE activity_applications
-                SET reason = ?, status = 'pending', attempt_count = ?,
+                SET reason = ?, applicant_contact = ?, status = 'pending', attempt_count = ?,
                     reviewed_at = NULL, updated_at = ?
                 WHERE application_id = ?
                 """,
-                (clean_reason, attempt_count, now, application_id),
+                (clean_reason, clean_applicant_contact, attempt_count, now, application_id),
             )
         else:
             application_id = _new_id("application")
@@ -1249,10 +1301,18 @@ def apply_to_activity(
                     """
                     INSERT INTO activity_applications(
                         application_id, activity_id, applicant_email, reason,
-                        status, attempt_count, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, 'pending', 1, ?, ?)
+                        applicant_contact, status, attempt_count, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, 'pending', 1, ?, ?)
                     """,
-                    (application_id, activity_id, applicant, clean_reason, now, now),
+                    (
+                        application_id,
+                        activity_id,
+                        applicant,
+                        clean_reason,
+                        clean_applicant_contact,
+                        now,
+                        now,
+                    ),
                 )
             except Exception as error:
                 if is_integrity_error(error):
@@ -1297,10 +1357,16 @@ def apply_to_activity(
                 payload={"activity_id": activity_id, "activity_title": title},
                 idempotency_key=f"activity-auto-joined-mail:{application_id}:{attempt_count}",
             )
-            organizer_message = f"{applicant_name} 已直接加入“{title}”。"
+            organizer_message = (
+                f"{applicant_name} 已直接加入“{title}”。"
+                f"联系方式：{clean_applicant_contact}"
+            )
             organizer_type = "activity_member_joined"
         else:
-            organizer_message = f"{applicant_name} 申请加入“{title}”。"
+            organizer_message = (
+                f"{applicant_name} 申请加入“{title}”。"
+                f"联系方式：{clean_applicant_contact}"
+            )
             organizer_type = "activity_application_created"
 
         _enqueue_notification(
@@ -1322,6 +1388,7 @@ def apply_to_activity(
                 "activity_title": title,
                 "application_id": application_id,
                 "applicant_name": applicant_name,
+                "applicant_contact": clean_applicant_contact,
                 "reason": clean_reason,
                 "approval_required": bool(activity["approval_required"]),
             },
@@ -1359,7 +1426,8 @@ def list_activity_applications(
         rows = connection.execute(
             """
             SELECT aa.application_id, aa.applicant_email, aa.reason, aa.status,
-                   aa.attempt_count, aa.created_at, aa.updated_at, aa.reviewed_at,
+                   aa.applicant_contact, aa.attempt_count, aa.created_at,
+                   aa.updated_at, aa.reviewed_at,
                    COALESCE(p.display_name, '') AS applicant_name
             FROM activity_applications AS aa
             LEFT JOIN profiles AS p ON p.email = aa.applicant_email

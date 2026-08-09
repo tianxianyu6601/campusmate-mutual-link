@@ -64,6 +64,8 @@ class EmailTaskTests(unittest.TestCase):
         self.assertEqual({"claimed": 1, "sent": 1, "failed": 0, "dead": 0}, result)
         self.assertEqual("owner@example.com", deliveries[0][0])
         self.assertIn("周末羽毛球", deliveries[0][2])
+        self.assertIn("申请联系方式", deliveries[0][2])
+        self.assertIn("member@example.com", deliveries[0][2])
         with transaction(self.database) as connection:
             status = connection.execute(
                 "SELECT status FROM email_tasks"
