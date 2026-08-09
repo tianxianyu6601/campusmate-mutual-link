@@ -99,6 +99,16 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual("share", row["category"])
         self.assertEqual("拼车", row["tag"])
 
+    def test_partially_applied_column_migration_recovers(self) -> None:
+        database = self.root / "partial-column.db"
+        run_migrations(database)
+        with transaction(database) as connection:
+            connection.execute("DELETE FROM schema_migrations WHERE version = 6")
+
+        self.assertEqual([6], run_migrations(database))
+        self.assertEqual([], run_migrations(database))
+        self.assertEqual(6, current_schema_version(database))
+
     def test_migration_preserves_legacy_users(self) -> None:
         database = self.root / "legacy.db"
         with closing(sqlite3.connect(database)) as connection:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import threading
 import time
 from dataclasses import dataclass
@@ -376,6 +377,37 @@ def _ensure_migration_table(connection: DatabaseConnection) -> None:
     )
 
 
+_ADD_COLUMN_RE = re.compile(
+    r"^\s*ALTER\s+TABLE\s+([A-Za-z_][A-Za-z0-9_]*)\s+"
+    r"ADD\s+COLUMN\s+([A-Za-z_][A-Za-z0-9_]*)\b",
+    re.IGNORECASE,
+)
+
+
+def _add_column_already_exists(
+    connection: DatabaseConnection, statement: str
+) -> bool:
+    """Check trusted ADD COLUMN migrations before executing partial retries."""
+
+    match = _ADD_COLUMN_RE.match(statement)
+    if match is None:
+        return False
+    table_name, column_name = match.groups()
+    if connection.backend == "postgresql":
+        row = connection.execute(
+            """
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name = ? AND column_name = ?
+            """,
+            (table_name, column_name),
+        ).fetchone()
+        return row is not None
+    rows = connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return any(str(row["name"]) == column_name for row in rows)
+
+
 def run_migrations(sqlite_path: Path | None = None) -> list[int]:
     applied_now: list[int] = []
     with transaction(sqlite_path, immediate=True) as connection:
@@ -389,6 +421,8 @@ def run_migrations(sqlite_path: Path | None = None) -> list[int]:
             if migration.version in applied:
                 continue
             for statement in migration.statements:
+                if _add_column_already_exists(connection, statement):
+                    continue
                 connection.execute(statement)
             connection.execute(
                 "INSERT INTO schema_migrations(version, name, applied_at) VALUES (?, ?, ?)",

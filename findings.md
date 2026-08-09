@@ -11,6 +11,7 @@
 - 首次线上退出回归仍看到旧首页约 3 秒：根因是 Cookie 删除组件位于登录页渲染之前。服务端令牌撤销保持在前，Cookie 写入/删除改到 `navigation.run()` 之后，使目标页面先绘制、组件随后完成持久化。
 - 云端单击登录虽已成功但仍约 5 秒才出现首页；链路中还有“认证重跑后再从默认登录页切首页”的第二次自动跳转。认证导航现改为首页默认页，并用一次性 `login_transition_pending` 区分刚登录与浏览器刷新，刚登录不再二次切页。
 - 仅用一次 `st.rerun()` 的本地热更新回归出现登录表单与首页 DOM 同时残留；改为在未登录隐藏导航中注册受 `require_login()` 保护的首页过渡目标，登录成功执行一次真实 `st.switch_page`，既保持单击一次，又由页面切换清空旧 DOM。
+- 最终部署出现空白页，Streamlit Cloud 日志明确报 PostgreSQL `DuplicateColumn: organizer_contact already exists`：v6 字段已存在但迁移版本记录缺失。迁移执行器增加仅针对 `ADD COLUMN` 的重复字段恢复逻辑，继续补齐并登记版本，不改动现有数据。
 
 ## 已确认需求
 
