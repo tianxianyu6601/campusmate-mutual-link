@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 from zoneinfo import ZoneInfo
 
+from data.schema import ProfileValidationError, ensure_valid_profile
 from services.auth import AuthError, normalize_email
 from services.database import (
     DEFAULT_SQLITE_PATH,
@@ -157,7 +158,8 @@ CYCLE_CUTOFF_HOUR = 19
 CYCLE_CUTOFF_MINUTE = 0
 CYCLE_PREVIOUS_CUTOFF_HOUR = 16
 CYCLE_PREVIOUS_CUTOFF_MINUTE = 30
-CYCLE_MINIMUM_SCORE = 45.0
+CYCLE_MINIMUM_SCORE = 60.0
+CYCLE_MINIMUM_DIRECTIONAL_SCORE = 55.0
 
 
 class ServiceError(RuntimeError):
@@ -2010,6 +2012,17 @@ def enroll_in_match_round(
             raise ValidationError("本轮行动卡数据无效，请重新填写") from error
         if not isinstance(action_card, dict) or not action_card.get("user_id"):
             raise ValidationError("本轮行动卡不完整，请重新填写")
+        try:
+            ensure_valid_profile(action_card)
+        except ProfileValidationError as error:
+            raise ValidationError("本轮行动卡未通过校验，请重新填写") from error
+        account_row = connection.execute(
+            "SELECT user_id FROM users WHERE email = ?", (normalized,)
+        ).fetchone()
+        if account_row is None or str(action_card["user_id"]) != str(
+            account_row["user_id"]
+        ):
+            raise ValidationError("本轮行动卡与当前账号不一致，请重新填写")
         snapshot = {
             "profile": dict(profile),
             "interests": [dict(item) for item in interest_rows],
@@ -2185,10 +2198,11 @@ def finalize_match_round(
         )
         enrollment_rows = connection.execute(
             """
-            SELECT e.email, s.profile_json
+            SELECT e.email, u.user_id, s.profile_json
             FROM match_enrollments AS e
             JOIN match_profile_snapshots AS s
               ON s.round_id = e.round_id AND s.email = e.email
+            JOIN users AS u ON u.email = e.email
             WHERE e.round_id = ? AND e.status = 'enrolled'
             ORDER BY e.enrolled_at, e.email
             """,
@@ -2207,6 +2221,12 @@ def finalize_match_round(
                 continue
             card = snapshot.get("action_card")
             if not isinstance(card, dict) or not card.get("user_id"):
+                continue
+            try:
+                ensure_valid_profile(card)
+            except ProfileValidationError:
+                continue
+            if str(card["user_id"]) != str(row["user_id"]):
                 continue
             email = str(row["email"])
             user_id = str(card["user_id"])
@@ -2241,6 +2261,7 @@ def finalize_match_round(
         }
 
         edges: list[dict[str, Any]] = []
+        hard_compatible_emails: set[str] = set()
         cards = list(cards_by_id.values())
         for index, left in enumerate(cards):
             for right in cards[index + 1 :]:
@@ -2251,10 +2272,18 @@ def finalize_match_round(
                 if edge is None:
                     continue
                 base_score = float(edge["score"])
-                if base_score < CYCLE_MINIMUM_SCORE:
-                    continue
                 left_email = email_by_user_id[str(edge["user_a"])]
                 right_email = email_by_user_id[str(edge["user_b"])]
+                hard_compatible_emails.update((left_email, right_email))
+                directional_floor = min(
+                    float(edge.get("a_to_b", 0.0)),
+                    float(edge.get("b_to_a", 0.0)),
+                )
+                if (
+                    base_score < CYCLE_MINIMUM_SCORE
+                    or directional_floor < CYCLE_MINIMUM_DIRECTIONAL_SCORE
+                ):
+                    continue
                 fairness_bonus = min(
                     6.0,
                     1.5
@@ -2270,7 +2299,7 @@ def finalize_match_round(
                 )
                 edge["base_score"] = round(base_score, 1)
                 edge["fairness_adjustment"] = round(fairness_bonus - repeat_penalty, 1)
-                edge["score"] = round(
+                edge["selection_score"] = round(
                     max(0.0, min(100.0, base_score + fairness_bonus - repeat_penalty)),
                     1,
                 )
@@ -2285,6 +2314,9 @@ def finalize_match_round(
             explanation = {
                 "base_score": match.get("base_score", match["score"]),
                 "fairness_adjustment": match.get("fairness_adjustment", 0.0),
+                "selection_score": match.get("selection_score", match["score"]),
+                "a_to_b": match.get("a_to_b", match["score"]),
+                "b_to_a": match.get("b_to_a", match["score"]),
                 "dimension_scores": match.get("dimension_scores", {}),
                 "reasons": match.get("reasons", []),
                 "common_times": match.get("common_times", []),
@@ -2351,8 +2383,10 @@ def finalize_match_round(
                 continue
             if email not in snapshots:
                 reason = "行动卡数据无效，请在下一轮重新填写"
-            elif email not in edge_members:
+            elif email not in hard_compatible_emails:
                 reason = "本轮没有同时满足时间、地点和其他硬条件的搭子"
+            elif email not in edge_members:
+                reason = "存在硬条件相符的候选，但双向满意度未达到安全阈值"
             else:
                 reason = "本轮人数为奇数或全局组合限制，未能形成稳定配对"
             connection.execute(

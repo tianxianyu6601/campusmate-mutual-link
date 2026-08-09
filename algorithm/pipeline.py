@@ -54,6 +54,8 @@ def build_match(user_a: Mapping[str, Any], user_b: Mapping[str, Any]) -> dict[st
     return {
         "user_a": str(user_a["user_id"]),
         "user_b": str(user_b["user_id"]),
+        "a_to_b": round(float(scores["a_to_b"]), 1),
+        "b_to_a": round(float(scores["b_to_a"]), 1),
         "score": round(float(scores["score"]), 1),
         "dimension_scores": dimension_scores,
         "reasons": reasons or ["两份行动卡通过硬性条件过滤，可进一步沟通安排。"],

@@ -13,7 +13,7 @@ from services.platform_service import ServiceError, get_match_result_for_user
 def _labels(values: list[str], mapping: dict[str, str]) -> str:
     if not values:
         return "暂无"
-    return "、".join(mapping.get(value, value) for value in values)
+    return "、".join(vocab.display_value(value, mapping) for value in values)
 
 
 auth_user = require_login()
@@ -63,7 +63,9 @@ with partner_col:
     match_type = str(partner_card.get("match_type", ""))
     activity = str(partner_card.get("activity", ""))
     match_type_label = vocab.MATCH_TYPES.get(match_type, match_type)
-    activity_label = vocab.ACTIVITIES.get(match_type, {}).get(activity, activity)
+    activity_label = vocab.display_value(
+        activity, vocab.ACTIVITIES.get(match_type, {})
+    )
     if match_type_label or activity_label:
         st.write(" · ".join(value for value in (match_type_label, activity_label) if value))
     if partner_card.get("self_description"):

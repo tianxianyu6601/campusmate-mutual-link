@@ -81,6 +81,32 @@ class ProfileBuilderTests(unittest.TestCase):
         self.assertFalse(result.is_valid)
         self.assertIn("sensitive_field", {issue.code for issue in result.issues})
 
+    def test_custom_activity_location_and_interest_are_canonical_and_valid(self):
+        answers = valid_answers()
+        answers.update(
+            {
+                "activity": "相对论讨论",
+                "acceptable_locations": ["海淀公园", "圆明园东门"],
+                "hard_restrictions": [],
+                "interests": ["量子计算"],
+            }
+        )
+        profile = build_profile(answers, user_id="U0006")
+        self.assertEqual("custom:相对论讨论", profile["activity"])
+        self.assertEqual(
+            ["haidian_park", "custom:圆明园东门"],
+            profile["acceptable_locations"],
+        )
+        self.assertEqual(["custom:量子计算"], profile["interests"])
+        self.assertTrue(profile["allow_off_campus"])
+        self.assertTrue(validate_profile(profile).is_valid)
+
+    def test_known_activity_from_wrong_match_type_is_not_recast_as_custom(self):
+        answers = valid_answers()
+        answers["activity"] = "running"
+        with self.assertRaises(ProfileValidationError):
+            build_profile(answers, user_id="U0007")
+
 
 if __name__ == "__main__":
     unittest.main()

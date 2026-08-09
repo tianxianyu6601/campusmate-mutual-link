@@ -165,9 +165,16 @@ def _nearby_levels(level: str) -> List[str]:
 def _choose_interests(
     activity: str, match_type: str, rng: random.Random
 ) -> List[str]:
-    selected = list(ACTIVITY_INTERESTS[activity])
     category_pool = {
-        "study": ["reading", "research", "programming", "mathematics", "languages"],
+        "study": [
+            "reading",
+            "research",
+            "programming",
+            "mathematics",
+            "languages",
+            "physics",
+            "writing",
+        ],
         "sport": ["running", "ball_sports", "fitness", "outdoors"],
         "interest": [
             "movies",
@@ -178,8 +185,11 @@ def _choose_interests(
             "food",
             "city_exploration",
             "lectures",
+            "travel",
+            "volunteering",
         ],
     }[match_type]
+    selected = list(ACTIVITY_INTERESTS.get(activity, tuple(category_pool[:2])))
     for candidate in rng.sample(category_pool, k=min(2, len(category_pool))):
         if candidate not in selected:
             selected.append(candidate)

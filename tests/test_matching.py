@@ -8,6 +8,7 @@ from pathlib import Path
 
 from algorithm.baseline import interest_greedy_matching, random_matching
 from algorithm.pipeline import run_global_matching, run_matching
+from algorithm.graph_matching import max_weight_matching
 from data.data_loader import load_users
 from evaluation.metrics import validate_pairing_integrity
 
@@ -59,6 +60,22 @@ class MatchingPipelineTests(unittest.TestCase):
             matches = run_matching(users[0], users, top_k=3)
             self.assertLessEqual(len(matches), 3)
             self.assertTrue(all(0 <= match["score"] <= 100 for match in matches))
+
+    def test_global_matching_is_deterministic_and_uses_selection_score(self) -> None:
+        edges = [
+            {"user_a": "A", "user_b": "B", "score": 90, "selection_score": 50},
+            {"user_a": "C", "user_b": "D", "score": 90, "selection_score": 50},
+            {"user_a": "A", "user_b": "C", "score": 80, "selection_score": 100},
+            {"user_a": "B", "user_b": "D", "score": 80, "selection_score": 100},
+        ]
+        expected = {frozenset(("A", "C")), frozenset(("B", "D"))}
+        for candidate_edges in (edges, list(reversed(edges))):
+            selected = max_weight_matching(candidate_edges)
+            pairs = {
+                frozenset((str(item["user_a"]), str(item["user_b"])))
+                for item in selected
+            }
+            self.assertEqual(expected, pairs)
 
 
 if __name__ == "__main__":

@@ -128,6 +128,7 @@ def _validate_string_list(
     *,
     allowed: Iterable[str] | None = None,
     required: bool = True,
+    allow_custom: bool = False,
 ) -> None:
     value = profile.get(field)
     if not isinstance(value, list):
@@ -142,7 +143,12 @@ def _validate_string_list(
         issues.append(ValidationIssue(field, "duplicate_item", "列表中不能有重复项"))
     if allowed is not None:
         allowed_set = set(allowed)
-        unknown = sorted(set(value) - allowed_set)
+        unknown = sorted(
+            item
+            for item in set(value)
+            if item not in allowed_set
+            and not (allow_custom and vocab.is_custom_value(item))
+        )
         if unknown:
             issues.append(
                 ValidationIssue(field, "unknown_value", f"包含未知值：{unknown}")
@@ -243,6 +249,7 @@ def validate_profile(profile: Mapping[str, Any], *, strict: bool = True) -> Vali
         "acceptable_locations",
         issues,
         allowed=vocab.LOCATIONS,
+        allow_custom=True,
     )
     allow_off_campus = profile.get("allow_off_campus")
     if not isinstance(allow_off_campus, bool):
@@ -251,7 +258,7 @@ def validate_profile(profile: Mapping[str, Any], *, strict: bool = True) -> Vali
         )
     locations = profile.get("acceptable_locations")
     if isinstance(locations, list) and isinstance(allow_off_campus, bool):
-        expected = "off_campus_haidian" in locations
+        expected = any(vocab.is_off_campus_location(item) for item in locations)
         if allow_off_campus != expected:
             issues.append(
                 ValidationIssue(
@@ -309,6 +316,7 @@ def validate_profile(profile: Mapping[str, Any], *, strict: bool = True) -> Vali
         "interests",
         issues,
         allowed=vocab.INTEREST_TAGS,
+        allow_custom=True,
     )
 
     for field in ("self_description", "partner_expectation"):

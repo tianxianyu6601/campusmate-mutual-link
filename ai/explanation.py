@@ -11,7 +11,20 @@ from .text_similarity import bidirectional_text_scores
 
 
 def _labels(values: Sequence[str], mapping: Mapping[str, str]) -> str:
-    return "、".join(mapping.get(value, value) for value in values)
+    return "、".join(vocab.display_value(value, mapping) for value in values)
+
+
+def _common_values(left: Sequence[str], right: Sequence[str]) -> list[str]:
+    left_by_key = {
+        vocab.comparison_key(value): value
+        for value in left
+        if vocab.comparison_key(value)
+    }
+    right_keys = {vocab.comparison_key(value) for value in right}
+    return sorted(
+        (value for key, value in left_by_key.items() if key in right_keys),
+        key=vocab.comparison_key,
+    )
 
 
 def _common_times(user_a: Mapping[str, Any], user_b: Mapping[str, Any]) -> list[str]:
@@ -36,9 +49,9 @@ def generate_match_explanation(
         displayed = _labels(common_times[:2], vocab.TIME_SLOTS)
         reasons.append(f"你们至少有共同空闲时间：{displayed}。")
 
-    common_locations = sorted(
-        set(user_a.get("acceptable_locations", []))
-        & set(user_b.get("acceptable_locations", []))
+    common_locations = _common_values(
+        list(user_a.get("acceptable_locations", [])),
+        list(user_b.get("acceptable_locations", [])),
     )
     if common_locations:
         reasons.append(f"双方都接受在{_labels(common_locations[:2], vocab.LOCATIONS)}活动。")
@@ -48,7 +61,10 @@ def generate_match_explanation(
         goal = vocab.GOALS.get(match_type, {}).get(str(user_a.get("goal")), "相近目标")
         reasons.append(f"本周行动目标一致：{goal}。")
 
-    common_interests = sorted(set(user_a.get("interests", [])) & set(user_b.get("interests", [])))
+    common_interests = _common_values(
+        list(user_a.get("interests", [])),
+        list(user_b.get("interests", [])),
+    )
     if common_interests:
         reasons.append(f"你们共有兴趣标签：{_labels(common_interests[:3], vocab.INTEREST_TAGS)}。")
 

@@ -17,7 +17,9 @@ def _networkx_matching(edges: Sequence[Mapping[str, Any]]) -> set[frozenset[str]
         graph.add_edge(
             str(edge["user_a"]),
             str(edge["user_b"]),
-            weight=int(round(float(edge["score"]) * 1000)),
+            weight=int(
+                round(float(edge.get("selection_score", edge["score"])) * 1000)
+            ),
         )
     return {
         frozenset(pair)
@@ -33,7 +35,7 @@ def _greedy_fallback(edges: Sequence[Mapping[str, Any]]) -> set[frozenset[str]]:
     ordered = sorted(
         edges,
         key=lambda edge: (
-            -float(edge["score"]),
+            -float(edge.get("selection_score", edge["score"])),
             str(edge["user_a"]),
             str(edge["user_b"]),
         ),
@@ -53,7 +55,14 @@ def max_weight_matching(edges: Sequence[Mapping[str, Any]]) -> list[dict[str, An
 
     if isinstance(edges, (str, bytes)):
         raise TypeError("候选边必须是列表")
-    normalized = [dict(edge) for edge in edges]
+    normalized = sorted(
+        (dict(edge) for edge in edges),
+        key=lambda edge: (
+            str(edge["user_a"]),
+            str(edge["user_b"]),
+            -float(edge.get("selection_score", edge["score"])),
+        ),
+    )
     selected_pairs = _networkx_matching(normalized)
     if selected_pairs is None:
         selected_pairs = _greedy_fallback(normalized)
@@ -62,7 +71,14 @@ def max_weight_matching(edges: Sequence[Mapping[str, Any]]) -> list[dict[str, An
         for edge in normalized
         if frozenset((str(edge["user_a"]), str(edge["user_b"]))) in selected_pairs
     ]
-    return sorted(selected, key=lambda edge: (-float(edge["score"]), edge["user_a"], edge["user_b"]))
+    return sorted(
+        selected,
+        key=lambda edge: (
+            -float(edge.get("selection_score", edge["score"])),
+            edge["user_a"],
+            edge["user_b"],
+        ),
+    )
 
 
 __all__ = ["max_weight_matching"]

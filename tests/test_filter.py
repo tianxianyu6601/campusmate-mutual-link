@@ -70,6 +70,28 @@ class HardFilterTests(unittest.TestCase):
         self.assertFalse(result.passed)
         self.assertIn("不接受高强度活动", result.reasons)
 
+    def test_same_custom_activity_and_location_can_match(self) -> None:
+        left, right = self._pair()
+        left["activity"] = right["activity"] = "custom:量子物理讨论"
+        left["acceptable_locations"] = ["custom:圆明园东门"]
+        right["acceptable_locations"] = ["custom:圆明园东门"]
+        left["hard_restrictions"] = []
+        right["hard_restrictions"] = []
+        result = pass_hard_constraints(left, right)
+        self.assertTrue(result.passed)
+        self.assertEqual(("custom:圆明园东门",), result.common_locations)
+
+    def test_custom_location_is_conservatively_blocked_by_no_off_campus(self) -> None:
+        left, right = self._pair()
+        left["activity"] = right["activity"] = "custom:量子物理讨论"
+        left["acceptable_locations"] = ["custom:圆明园东门"]
+        right["acceptable_locations"] = ["custom:圆明园东门"]
+        left["hard_restrictions"] = ["no_off_campus"]
+        right["hard_restrictions"] = []
+        result = pass_hard_constraints(left, right)
+        self.assertFalse(result.passed)
+        self.assertIn("没有双方都能接受的地点", result.reasons)
+
 
 if __name__ == "__main__":
     unittest.main()

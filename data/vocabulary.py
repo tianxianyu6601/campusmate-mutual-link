@@ -6,7 +6,13 @@ display-only and may be changed without changing the data contract.
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from typing import Dict, Iterable, List, Mapping, Tuple
+
+
+CUSTOM_VALUE_PREFIX = "custom:"
+MAX_CUSTOM_VALUE_LENGTH = 60
 
 
 MATCH_TYPES: Dict[str, str] = {
@@ -18,11 +24,21 @@ MATCH_TYPES: Dict[str, str] = {
 ACTIVITIES: Dict[str, Dict[str, str]] = {
     "study": {
         "python": "Python学习",
+        "physics": "物理",
+        "chemistry": "化学",
+        "biology": "生物",
         "higher_mathematics": "高等数学",
         "linear_algebra": "线性代数",
+        "statistics": "概率与统计",
+        "economics": "经济学",
+        "law": "法学",
+        "history": "历史",
+        "academic_writing": "论文与学术写作",
         "english_cet": "四六级英语",
         "ielts_toefl": "雅思/托福",
+        "other_languages": "其他语言学习",
         "algorithms": "算法题练习",
+        "data_science": "数据科学/机器学习",
         "course_project": "课程项目",
         "general_study": "综合自习",
     },
@@ -34,6 +50,14 @@ ACTIVITIES: Dict[str, Dict[str, str]] = {
         "cycling": "骑行",
         "basketball": "篮球",
         "table_tennis": "乒乓球",
+        "football": "足球",
+        "volleyball": "排球",
+        "tennis": "网球",
+        "frisbee": "飞盘",
+        "hiking": "徒步",
+        "yoga": "瑜伽",
+        "dance": "舞蹈",
+        "climbing": "攀岩",
     },
     "interest": {
         "movie": "看电影",
@@ -44,6 +68,15 @@ ACTIVITIES: Dict[str, Dict[str, str]] = {
         "live_music": "音乐演出",
         "food_exploration": "探店",
         "city_walk": "城市探索",
+        "reading": "读书交流",
+        "karaoke": "唱歌/KTV",
+        "theatre": "戏剧/演出",
+        "museum": "博物馆",
+        "gaming": "电子游戏",
+        "travel": "旅行",
+        "cooking": "烹饪",
+        "volunteering": "志愿活动",
+        "coffee_chat": "Coffee Chat",
     },
 }
 
@@ -71,17 +104,32 @@ GOALS: Dict[str, Dict[str, str]] = {
     },
 }
 
-# Place categories are scoped to the Peking University scenario while avoiding
-# brittle building-specific assumptions.
+# Common places improve discoverability; custom entries cover the open world.
 LOCATIONS: Dict[str, str] = {
     "pku_library": "北京大学图书馆",
     "teaching_building": "校内教学楼",
+    "science_teaching_building": "理科教学楼",
+    "second_teaching_building": "第二教学楼",
     "sports_field": "校内操场",
+    "may_fourth_sports_field": "五四体育场",
     "gymnasium": "校内体育馆",
+    "choi_kai_yau_gymnasium": "邱德拔体育馆",
     "campus_common_area": "校内公共区域",
+    "new_sun_student_center": "新太阳学生中心",
+    "pku_hall": "百周年纪念讲堂",
+    "yingjie_exchange_center": "英杰交流中心",
+    "weiming_lake": "未名湖",
+    "campus_canteen": "校内食堂",
+    "haidian_park": "海淀公园",
+    "zhongguancun": "中关村",
+    "wudaokou": "五道口",
     "off_campus_haidian": "海淀校外区域",
     "online": "线上",
 }
+
+OFF_CAMPUS_LOCATION_CODES = frozenset(
+    {"haidian_park", "zhongguancun", "wudaokou", "off_campus_haidian"}
+)
 
 LEVELS: Dict[str, str] = {
     "novice": "零基础/新手",
@@ -142,6 +190,17 @@ INTEREST_TAGS: Dict[str, str] = {
     "food": "美食",
     "city_exploration": "城市探索",
     "lectures": "讲座",
+    "physics": "物理",
+    "chemistry": "化学",
+    "biology": "生物",
+    "economics": "经济学",
+    "law": "法学",
+    "history": "历史",
+    "writing": "写作",
+    "volunteering": "志愿服务",
+    "travel": "旅行",
+    "dance": "舞蹈",
+    "gaming": "电子游戏",
 }
 
 PREFERENCE_DIMENSIONS: Dict[str, str] = {
@@ -204,8 +263,61 @@ def flatten_activity_codes() -> Iterable[str]:
         yield from category_activities
 
 
+def normalize_free_text(value: object) -> str:
+    """Normalize harmless text differences while preserving readable content."""
+
+    text = unicodedata.normalize("NFKC", str(value or ""))
+    return " ".join(text.strip().split())
+
+
+def custom_value(value: object) -> str:
+    """Encode one user-defined questionnaire value in the stable contract."""
+
+    text = normalize_free_text(value)
+    if text.startswith(CUSTOM_VALUE_PREFIX):
+        text = normalize_free_text(text[len(CUSTOM_VALUE_PREFIX) :])
+    return f"{CUSTOM_VALUE_PREFIX}{text}" if text else ""
+
+
+def is_custom_value(value: object) -> bool:
+    text = normalize_free_text(value)
+    if not text.startswith(CUSTOM_VALUE_PREFIX):
+        return False
+    payload = text[len(CUSTOM_VALUE_PREFIX) :]
+    return bool(payload) and len(payload) <= MAX_CUSTOM_VALUE_LENGTH and not re.search(
+        r"[\r\n\t]", payload
+    )
+
+
+def display_value(value: object, mapping: Mapping[object, str] | None = None) -> str:
+    """Return a readable label for built-in and user-defined values."""
+
+    if mapping is not None:
+        try:
+            if value in mapping:
+                return str(mapping[value])
+        except TypeError:
+            pass
+    text = normalize_free_text(value)
+    if text.startswith(CUSTOM_VALUE_PREFIX):
+        return text[len(CUSTOM_VALUE_PREFIX) :]
+    return text
+
+
+def comparison_key(value: object) -> str:
+    """Canonical key used only for conservative exact matching."""
+
+    return display_value(value).casefold()
+
+
+def is_off_campus_location(value: object) -> bool:
+    """Treat unknown custom places conservatively as potentially off campus."""
+
+    return value in OFF_CAMPUS_LOCATION_CODES or is_custom_value(value)
+
+
 def activity_belongs_to(match_type: str, activity: str) -> bool:
-    return activity in ACTIVITIES.get(match_type, {})
+    return activity in ACTIVITIES.get(match_type, {}) or is_custom_value(activity)
 
 
 def goal_belongs_to(match_type: str, goal: str) -> bool:

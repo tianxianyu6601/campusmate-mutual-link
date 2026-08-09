@@ -48,6 +48,39 @@ def _normalise_list(value: Any, mapping: Mapping[Any, str]) -> Any:
     return result
 
 
+def _normalise_open_choice(
+    value: Any,
+    mapping: Mapping[Any, str],
+    *,
+    reserved_values: Iterable[str] = (),
+) -> Any:
+    """Normalize a built-in choice or encode a validated custom label."""
+
+    normalised = _normalise_choice(value, mapping)
+    try:
+        if normalised in mapping or normalised in set(reserved_values):
+            return normalised
+    except TypeError:
+        return normalised
+    if isinstance(normalised, str):
+        return vocab.custom_value(normalised)
+    return normalised
+
+
+def _normalise_open_list(value: Any, mapping: Mapping[Any, str]) -> Any:
+    if not isinstance(value, (list, tuple, set)):
+        return value
+    result: List[Any] = []
+    seen: set[str] = set()
+    for item in value:
+        normalised = _normalise_open_choice(item, mapping)
+        key = vocab.comparison_key(normalised)
+        if key and key not in seen:
+            result.append(normalised)
+            seen.add(key)
+    return result
+
+
 def _normalise_text(value: Any) -> Any:
     if not isinstance(value, str):
         return value
@@ -126,7 +159,7 @@ def build_profile(
     activity_mapping = vocab.ACTIVITIES.get(match_type, {})
     goal_mapping = vocab.GOALS.get(match_type, {})
 
-    locations = _normalise_list(
+    locations = _normalise_open_list(
         answers.get("acceptable_locations"), vocab.LOCATIONS
     )
     if not isinstance(locations, list):
@@ -143,7 +176,11 @@ def build_profile(
         "schema_version": SCHEMA_VERSION,
         "user_id": user_id or answers.get("user_id"),
         "match_type": match_type,
-        "activity": _normalise_choice(answers.get("activity"), activity_mapping),
+        "activity": _normalise_open_choice(
+            answers.get("activity"),
+            activity_mapping,
+            reserved_values=vocab.flatten_activity_codes(),
+        ),
         "available_times": _normalise_list(
             answers.get("available_times"), vocab.TIME_SLOTS
         ),
@@ -151,7 +188,10 @@ def build_profile(
             answers.get("min_session_minutes", 60)
         ),
         "acceptable_locations": locations,
-        "allow_off_campus": "off_campus_haidian" in locations_for_derived_value,
+        "allow_off_campus": any(
+            vocab.is_off_campus_location(item)
+            for item in locations_for_derived_value
+        ),
         "group_size_preference": _normalise_choice(
             answers.get("group_size_preference"), vocab.GROUP_SIZES
         ),
@@ -182,7 +222,9 @@ def build_profile(
         "organization_role": _normalise_choice(
             answers.get("organization_role"), vocab.ORGANIZATION_ROLES
         ),
-        "interests": _normalise_list(answers.get("interests"), vocab.INTEREST_TAGS),
+        "interests": _normalise_open_list(
+            answers.get("interests"), vocab.INTEREST_TAGS
+        ),
         "self_description": _normalise_text(answers.get("self_description")),
         "partner_expectation": _normalise_text(answers.get("partner_expectation")),
         "preference_weights": build_preference_weights(

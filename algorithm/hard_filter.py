@@ -11,7 +11,6 @@ from data import vocabulary as vocab
 
 _SLOT_RE = re.compile(r"^(mon|tue|wed|thu|fri|sat|sun)_(\d{2})_(\d{2})$")
 _DAY_INDEX = {code: index for index, (code, _label) in enumerate(vocab.WEEKDAYS)}
-_OFF_CAMPUS = "off_campus_haidian"
 
 
 @dataclass(frozen=True)
@@ -98,12 +97,28 @@ def common_locations(
 ) -> tuple[str, ...]:
     """Return mutually acceptable locations after location restrictions."""
 
-    locations = set(user_a.get("acceptable_locations", [])) & set(
-        user_b.get("acceptable_locations", [])
-    )
+    left_locations = {
+        vocab.comparison_key(value): str(value)
+        for value in user_a.get("acceptable_locations", [])
+        if vocab.comparison_key(value)
+    }
+    right_keys = {
+        vocab.comparison_key(value)
+        for value in user_b.get("acceptable_locations", [])
+        if vocab.comparison_key(value)
+    }
+    locations = {
+        value
+        for key, value in left_locations.items()
+        if key in right_keys
+    }
     if "no_off_campus" in _restrictions(user_a, user_b):
-        locations.discard(_OFF_CAMPUS)
-    return tuple(sorted(locations))
+        locations = {
+            value
+            for value in locations
+            if not vocab.is_off_campus_location(value)
+        }
+    return tuple(sorted(locations, key=vocab.comparison_key))
 
 
 def _level_compatible(user_a: Mapping[str, Any], user_b: Mapping[str, Any]) -> bool:
@@ -157,7 +172,9 @@ def pass_hard_constraints(
         reasons.append("不能与自己匹配")
     if user_a.get("match_type") != user_b.get("match_type"):
         reasons.append("搭子类型不同")
-    if user_a.get("activity") != user_b.get("activity"):
+    if vocab.comparison_key(user_a.get("activity")) != vocab.comparison_key(
+        user_b.get("activity")
+    ):
         reasons.append("活动项目不同")
 
     required_minutes = max(

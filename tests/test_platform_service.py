@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from pathlib import Path
+from unittest.mock import patch
 
 from services.database import transaction
 from services.migrations import run_migrations
@@ -945,6 +946,27 @@ class PlatformServiceTests(unittest.TestCase):
         self.assertEqual(1, enrollment_count)
         self.assertEqual(1, snapshot_count)
 
+    def test_match_enrollment_rejects_action_card_from_another_account(self) -> None:
+        self.save_profile("member1@example.com", "小北")
+        self.save_action_card("member1@example.com", "U0053")
+        now = int(time.time())
+        round_id = create_match_round(
+            "owner@example.com",
+            name="行动卡归属校验",
+            registration_opens_at=now - 60,
+            registration_closes_at=now + 600,
+            results_at=now + 600,
+            status="open",
+            sqlite_path=self.database,
+        )
+
+        with self.assertRaisesRegex(ValidationError, "当前账号不一致"):
+            enroll_in_match_round(
+                round_id,
+                "member1@example.com",
+                sqlite_path=self.database,
+            )
+
 
     def test_weekly_round_closes_sunday_at_1900_beijing(self) -> None:
         saturday = int(datetime(2026, 8, 8, 12, tzinfo=ZoneInfo("Asia/Shanghai")).timestamp())
@@ -1027,6 +1049,55 @@ class PlatformServiceTests(unittest.TestCase):
             sqlite_path=self.database,
         )
         self.assertIsNotNone(overview["latest_result_round"])
+
+    def test_cycle_round_does_not_force_a_low_reciprocal_score(self) -> None:
+        for email, user_id in USERS[:2]:
+            self.save_profile(email, email.split("@", 1)[0])
+            self.save_action_card(email, user_id)
+        now = int(time.time())
+        round_id = create_match_round(
+            "owner@example.com",
+            name="低分不强配测试",
+            registration_opens_at=now - 600,
+            registration_closes_at=now + 60,
+            results_at=now + 60,
+            status="open",
+            sqlite_path=self.database,
+        )
+        for email, _user_id in USERS[:2]:
+            enroll_in_match_round(round_id, email, sqlite_path=self.database)
+
+        low_score_edge = {
+            "user_a": "U0051",
+            "user_b": "U0052",
+            "a_to_b": 59.0,
+            "b_to_a": 59.0,
+            "score": 59.0,
+            "dimension_scores": {},
+            "reasons": ["仅用于阈值回归"],
+            "common_times": ["sun_18_00", "sun_18_30"],
+            "common_locations": ["pku_library"],
+        }
+        with patch("algorithm.pipeline.build_match", return_value=low_score_edge):
+            summary = finalize_match_round(
+                round_id,
+                now_timestamp=now + 61,
+                sqlite_path=self.database,
+            )
+
+        self.assertEqual(0, summary["matched_pairs"])
+        with closing(sqlite3.connect(self.database)) as connection:
+            reasons = {
+                str(row[0])
+                for row in connection.execute(
+                    "SELECT unmatched_reason FROM match_enrollments WHERE round_id = ?",
+                    (round_id,),
+                ).fetchall()
+            }
+        self.assertEqual(
+            {"存在硬条件相符的候选，但双向满意度未达到安全阈值"},
+            reasons,
+        )
 
     def test_cycle_enrollment_can_be_withdrawn_and_resubmitted(self) -> None:
         self.save_profile("member1@example.com", "member1")

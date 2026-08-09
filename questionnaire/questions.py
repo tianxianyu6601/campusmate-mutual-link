@@ -29,12 +29,14 @@ def _base_questions() -> List[Dict[str, Any]]:
         },
         {
             "id": "activity",
-            "label": "你本周想进行什么具体活动？",
+            "label": "你本周最想推进的具体活动或主题是什么？",
             "input_type": "single_select",
             "required": True,
             "constraint_type": "hard",
             "options": [],
-            "help_text": "选项会根据搭子类型变化。",
+            "accept_new_options": True,
+            "validation": {"max_length": 60},
+            "help_text": "可搜索已有选项；没有合适内容时直接输入，例如“物理”或“量子力学”。只有具体活动一致的人才会进入后续匹配。",
         },
         {
             "id": "available_times",
@@ -52,7 +54,9 @@ def _base_questions() -> List[Dict[str, Any]]:
             "required": True,
             "constraint_type": "hard",
             "options": vocab.options(vocab.LOCATIONS),
-            "help_text": "选择海淀校外区域即代表接受校外活动。",
+            "accept_new_options": True,
+            "validation": {"min_items": 1, "max_items": 12},
+            "help_text": "可选择多个地点，也可直接输入海淀公园等具体地点。为避免误配，自定义地点会按“可能在校外”处理。",
         },
         {
             "id": "group_size_preference",
@@ -60,7 +64,14 @@ def _base_questions() -> List[Dict[str, Any]]:
             "input_type": "single_select",
             "required": True,
             "constraint_type": "hard",
-            "options": vocab.options(vocab.GROUP_SIZES),
+            "options": vocab.options(
+                {
+                    key: label
+                    for key, label in vocab.GROUP_SIZES.items()
+                    if key in {"one_to_one", "either"}
+                }
+            ),
+            "help_text": "周期匹配当前为一对一配对；多人活动请使用组局广场。",
         },
         {
             "id": "self_level",
@@ -159,7 +170,9 @@ def _base_questions() -> List[Dict[str, Any]]:
             "required": True,
             "constraint_type": "soft",
             "options": vocab.options(vocab.INTEREST_TAGS),
+            "accept_new_options": True,
             "validation": {"min_items": 1, "max_items": 6},
+            "help_text": "选择已有标签，或输入自己的兴趣后按 Enter；最多六项。",
         },
         {
             "id": "self_description",

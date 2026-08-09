@@ -24,6 +24,15 @@ class QuestionDefinitionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             get_questions("dating")
 
+    def test_open_world_questions_accept_user_defined_values(self):
+        questions = {item["id"]: item for item in get_questions("study")}
+        for question_id in ("activity", "acceptable_locations", "interests"):
+            self.assertTrue(questions[question_id]["accept_new_options"])
+        group_values = {
+            item["value"] for item in questions["group_size_preference"]["options"]
+        }
+        self.assertEqual({"one_to_one", "either"}, group_values)
+
 
 if __name__ == "__main__":
     unittest.main()

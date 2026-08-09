@@ -101,6 +101,21 @@ def _widget_label(question: Mapping[str, Any]) -> str:
     return f"{question['label']}{marker}"
 
 
+def _format_option(value: Any, labels: Mapping[Any, str]) -> str:
+    return str(labels.get(value) or vocab.display_value(value))
+
+
+def _return_to_type_selection() -> None:
+    """Leave the action card and return to the actual type selector."""
+
+    for key in list(st.session_state):
+        if key.startswith("question_"):
+            del st.session_state[key]
+    st.session_state.pop("cycle_match_type_selector", None)
+    st.session_state.selected_match_type = None
+    st.switch_page("pages/cycle_match.py")
+
+
 def _render_time_question(question: Mapping[str, Any]) -> list[str]:
     """Render the large time vocabulary as seven manageable selectors."""
 
@@ -162,20 +177,24 @@ def _render_question(question: Mapping[str, Any]) -> Any:
         return st.selectbox(
             label,
             options=values,
-            format_func=labels.get,
+            format_func=lambda value: _format_option(value, labels),
             index=None,
             key=key,
             help=help_text,
             placeholder=tr(language, "请选择一项", "Select one option"),
+            accept_new_options=bool(question.get("accept_new_options")),
         )
     if input_type == "multi_select":
+        validation = question.get("validation", {})
         return st.multiselect(
             label,
             options=values,
-            format_func=labels.get,
+            format_func=lambda value: _format_option(value, labels),
             key=key,
             help=help_text,
             placeholder=tr(language, "请选择一项或多项", "Select one or more options"),
+            max_selections=validation.get("max_items"),
+            accept_new_options=bool(question.get("accept_new_options")),
         )
     if input_type == "rating":
         return st.slider(
@@ -316,9 +335,9 @@ with top_left:
 with top_right:
     if st.button(
         tr(language, "更换搭子类型", "Change Partner Type"),
-        use_container_width=True,
+        width="stretch",
     ):
-        st.switch_page("pages/home.py")
+        _return_to_type_selection()
 
 questions = localize_questions(get_questions(selected_match_type), language)
 
@@ -345,7 +364,7 @@ with st.form(f"campusmate_questionnaire_{selected_match_type}", clear_on_submit=
     submitted = st.form_submit_button(
         tr(language, "提交", "Submit"),
         type="secondary",
-        use_container_width=True,
+        width="stretch",
     )
 
 if submitted:
@@ -429,7 +448,7 @@ if st.session_state.get("current_profile"):
         if st.button(
             tr(language, "进入匹配页面", "Continue to Matching"),
             type="primary",
-            use_container_width=True,
+            width="stretch",
         ):
             st.switch_page("pages/cycle_match.py")
     else:

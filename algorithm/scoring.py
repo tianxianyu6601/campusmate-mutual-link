@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from ai.text_similarity import bidirectional_text_scores
+from data import vocabulary as vocab
 
 from .hard_filter import best_common_time_window
 
@@ -18,7 +19,10 @@ def _bounded(value: float) -> float:
 
 
 def _jaccard(left: list[str], right: list[str]) -> float:
-    left_set, right_set = set(left), set(right)
+    left_set = {vocab.comparison_key(value) for value in left}
+    right_set = {vocab.comparison_key(value) for value in right}
+    left_set.discard("")
+    right_set.discard("")
     union = left_set | right_set
     return len(left_set & right_set) / len(union) if union else 0.0
 
