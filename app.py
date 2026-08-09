@@ -88,12 +88,23 @@ def _available_pages(is_authenticated: bool) -> list[st.Page]:
         ]
 
     pages = [
+        # Keep a stable, non-empty /home route first. Streamlit resolves
+        # st.page_link/st.switch_page file targets to the first registered
+        # page with that source path.
         st.Page(
             "pages/home.py",
             title="首页",
             icon="🏠",
             url_path="home",
+        ),
+        # A separate page identity renders the same shared home content at the
+        # authenticated root URL without sacrificing the stable /home route.
+        st.Page(
+            "pages/root_home.py",
+            title="首页",
+            icon="🏠",
             default=True,
+            visibility="hidden",
         ),
         st.Page("pages/profile.py", title="个人资料", icon="👤"),
         st.Page("pages/activities.py", title="组局广场", icon="🎉"),
@@ -494,8 +505,7 @@ requested_route = str(navigation.url_path or "")
 
 if is_authenticated and not requested_route:
     if st.session_state.pop("login_transition_pending", False):
-        # Home is already the authenticated default. Avoid a second automatic
-        # page switch immediately after a successful login.
+        # Home is already the authenticated default after login.
         st.session_state["last_authenticated_route"] = "home"
         st.session_state["last_authenticated_query_params"] = {}
     else:
@@ -505,11 +515,25 @@ if is_authenticated and not requested_route:
             AUTHENTICATED_ROUTE_PATHS["home"],
         )
         restored_query_params = st.session_state.get("last_authenticated_query_params")
-        if restored_query_params:
-            st.switch_page(restored_path, query_params=dict(restored_query_params))
-        else:
-            st.switch_page(restored_path)
+        if restored_route != "home":
+            if st.session_state.get("_root_route_restore_attempted"):
+                # Some browsers can rerun before committing the new pathname.
+                # Fall back to the root home page instead of issuing another
+                # History API update. This caps automatic navigation at one.
+                st.session_state["last_authenticated_route"] = "home"
+                st.session_state["last_authenticated_query_params"] = {}
+            else:
+                st.session_state["_root_route_restore_attempted"] = True
+                if restored_query_params:
+                    st.switch_page(
+                        restored_path,
+                        query_params=dict(restored_query_params),
+                    )
+                else:
+                    st.switch_page(restored_path)
 elif is_authenticated:
+    # A committed non-root route proves that a one-shot restore succeeded.
+    st.session_state.pop("_root_route_restore_attempted", None)
     st.session_state.pop("login_transition_pending", None)
 
 pending_cookie: str | None = None

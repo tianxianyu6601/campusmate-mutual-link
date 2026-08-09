@@ -311,3 +311,10 @@
 - 现有 `networkx.max_weight_matching(..., maxcardinality=True)` 已满足“先最大化配对人数、再最大化总分”的核心需求，可在边权上叠加公平补偿和重复搭子惩罚。
 - Streamlit Cloud 不保证常驻后台线程；严格截止由服务端时间校验保证，结果自动发布使用“访问补跑 + GitHub Actions 定时工作流”双保险。
 - 定时工作流需要 GitHub 仓库 Secret `CAMPUSMATE_DATABASE_URL`；如需在工作流内直接发邮件，还需同步邮件服务对应的 Secret。
+
+## 2026-08-09：Safari 根网址访问失败
+
+- Safari 报错为 `Attempt to use history.pushState() more than 100 times per 10 seconds`，不是普通断网，而是前端 History API 被高频页面切换触发后遭浏览器拦截。
+- 入口脚本在“已认证且当前 URL 是根路径”时无条件调用 `st.switch_page()` 恢复旧路由；如果浏览器没有在下一轮及时确认新 `url_path`，同一分支会连续执行，构成导航循环。
+- 完全删除根路径恢复会使Cloud式刷新从个人资料页回到首页，因此最终采用会话级“一次且仅一次”恢复守卫：成功进入非根页面后清除守卫；浏览器若未确认路径，则回退首页并停止再次导航。
+- 默认页的 `url_path` 必定为空，直接用 `st.page_link` 指向它会生成空 `href`。最终使用独立的 `pages/root_home.py` 承担根路径，并让 `pages/home.py` 保持稳定 `/home`；两者复用同一渲染函数。
