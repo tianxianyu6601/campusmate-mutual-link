@@ -45,6 +45,8 @@ PERSISTED_SESSION_KEYS = (
     "matching_run",
     "current_match",
     "feedback_records",
+    "last_authenticated_route",
+    "last_authenticated_query_params",
 )
 MAIL_SYSTEM_VERSION = "mail-auto-fallback-2026-08-08-2"
 MAIL_USER_AGENT = "CampusMate/1.0 (Streamlit Cloud; mail verification)"

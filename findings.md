@@ -272,3 +272,6 @@
 - Streamlit Cloud 还有一层应用 iframe：只在登录成功瞬间渲染 Cookie 写入组件会随页面切换被移除，线上刷新仍可能丢失登录。已登录外壳必须稳定挂载同一写入器；写入器不负责导航，因此不会再制造嵌套页面或二次点击。
 - 原生 `st.html` 的 JavaScript 写入在 Streamlit Cloud 外层 iframe 中仍无法被刷新后的 Python 会话读回；改用 Streamlit 官方组件目录收录的 Extra Components 0.1.81 `CookieManager`，通过双向组件状态读写 Cookie，并保留原生脚本作为无组件测试环境的后备路径。
 - CookieManager 的写操作本身也是一个 Streamlit 组件；若在每个已登录页面重复调用，会给普通导航增加一次不必要的组件刷新。最终方案只在登录成功时写入，并在首次稳定的已登录外壳补写一次，之后页面只读取 Cookie。
+- Streamlit Cloud 外层 URL 固定在应用根地址，刷新会重建内部 app iframe 的根路由；因此仅恢复登录状态仍会把资料页带回首页。根路由现固定为登录页，首页使用明确 `/home`，已认证的根路由按服务端会话中最后一次内部路由和查询参数恢复。
+- 登录会话使用显式字段白名单持久化，新增的最后路由和查询参数必须加入 `PERSISTED_SESSION_KEYS`；只写入 `st.session_state` 不会自动进入数据库会话快照。
+- Cookie 组件首次挂载会异步返回并触发 rerun；若外壳先继续执行，页面脚本虽然能稍后恢复登录，但外壳会错过侧栏与路由记录。外壳现在在首次 Cookie 结果返回前停止执行，并用非敏感初始化 Cookie 处理组件不返回空字典的前端限制。

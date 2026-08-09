@@ -11,11 +11,13 @@ Individual pages consume the stable interfaces delivered by Part 1.
 from __future__ import annotations
 
 import time
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 import extra_streamlit_components as stx
 import streamlit as st
+from extra_streamlit_components.CookieManager import _component_func as cookie_component
 
 from services.auth import (
     AuthError,
@@ -31,6 +33,17 @@ from services.i18n import CHINESE
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
+AUTHENTICATED_ROUTE_PATHS = {
+    "home": "pages/home.py",
+    "profile": "pages/profile.py",
+    "activities": "pages/activities.py",
+    "cycle_match": "pages/cycle_match.py",
+    "messages": "pages/messages.py",
+    "questionnaire": "pages/questionnaire.py",
+    "matching": "pages/matching.py",
+    "result": "pages/result.py",
+    "ai_insights": "pages/ai_insights.py",
+}
 
 DEFAULT_SESSION_STATE: dict[str, Any] = {
     "auth_user": None,
@@ -62,13 +75,13 @@ def _available_pages(is_authenticated: bool) -> list[st.Page]:
             "pages/login.py",
             title="登录",
             icon="🔐",
-            default=not is_authenticated,
+            default=True,
         ),
         st.Page(
             "pages/home.py",
             title="首页",
             icon="🏠",
-            default=is_authenticated,
+            url_path="home",
         ),
         st.Page("pages/profile.py", title="个人资料", icon="👤"),
         st.Page("pages/activities.py", title="组局广场", icon="🎉"),
@@ -446,24 +459,62 @@ st.markdown(
 )
 
 _initialise_session_state()
-st.session_state["_browser_cookie_manager"] = stx.CookieManager(
-    key="campusmate_cookie_reader"
+browser_cookies = cookie_component(
+    method="getAll",
+    key="campusmate_cookie_reader",
+    default=None,
 )
+if browser_cookies is None:
+    # Ensure getAll has a truthy result even in a brand-new browser. The
+    # component's frontend does not emit an empty cookie dictionary.
+    cookie_component(
+        method="set",
+        cookie="cm_cookie_ready",
+        value="1",
+        options={
+            "path": "/",
+            "expires": (datetime.now() + timedelta(days=30)).isoformat(),
+            "sameSite": "strict",
+        },
+        key="campusmate_cookie_bootstrap",
+        default=False,
+    )
+    st.stop()
+cookie_manager = object.__new__(stx.CookieManager)
+cookie_manager.cookie_manager = cookie_component
+cookie_manager.cookies = dict(browser_cookies)
+st.session_state["_browser_cookie_manager"] = cookie_manager
 if st.session_state.pop("logout_requested", False):
     _logout()
 restore_persistent_session()
 
 is_authenticated = bool(st.session_state.get("auth_user"))
+available_pages = _available_pages(is_authenticated)
+navigation = st.navigation(available_pages, position="hidden")
+requested_route = str(navigation.url_path or "")
+
+if is_authenticated and not requested_route:
+    restored_route = str(st.session_state.get("last_authenticated_route") or "home")
+    restored_path = AUTHENTICATED_ROUTE_PATHS.get(
+        restored_route,
+        AUTHENTICATED_ROUTE_PATHS["home"],
+    )
+    restored_query_params = st.session_state.get("last_authenticated_query_params")
+    if restored_query_params:
+        st.switch_page(restored_path, query_params=dict(restored_query_params))
+    else:
+        st.switch_page(restored_path)
+
 if is_authenticated:
+    if requested_route in AUTHENTICATED_ROUTE_PATHS:
+        st.session_state["last_authenticated_route"] = requested_route
+        st.session_state["last_authenticated_query_params"] = dict(st.query_params)
     pending_cookie = st.session_state.pop("session_cookie_pending", None)
     if pending_cookie:
         # Mount the writer once on the stable authenticated shell so the login
         # page can switch immediately without losing the component update.
         write_session_cookie(str(pending_cookie))
     persist_current_session_state()
-
-available_pages = _available_pages(is_authenticated)
-navigation = st.navigation(available_pages, position="hidden")
 
 if not is_authenticated:
     _inject_login_shell_css()

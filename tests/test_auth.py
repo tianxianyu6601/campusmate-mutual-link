@@ -44,6 +44,8 @@ class AuthTests(unittest.TestCase):
             {
                 "selected_match_type": "study",
                 "questionnaire_answers": {"match_type": "study"},
+                "last_authenticated_route": "activities",
+                "last_authenticated_query_params": {"activity": "act_123"},
                 "ignored_key": "not persisted",
             },
         )
@@ -56,6 +58,11 @@ class AuthTests(unittest.TestCase):
         self.assertEqual(
             {"match_type": "study"},
             restored["state"]["questionnaire_answers"],
+        )
+        self.assertEqual("activities", restored["state"]["last_authenticated_route"])
+        self.assertEqual(
+            {"activity": "act_123"},
+            restored["state"]["last_authenticated_query_params"],
         )
         self.assertNotIn("ignored_key", restored["state"])
 
