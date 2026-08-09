@@ -412,14 +412,15 @@ def persist_current_session_state() -> None:
     _mark_session_persisted(token, current_state)
 
 
-def clear_persistent_session() -> None:
+def clear_persistent_session(*, revoke: bool = True) -> str | None:
     token = _current_session_token()
-    if token:
+    if token and revoke:
         delete_login_session(token)
     st.session_state.pop("session_token", None)
     st.session_state.pop(_VALIDATED_SESSION_TOKEN_KEY, None)
     st.session_state.pop(_PERSISTED_SESSION_DIGEST_KEY, None)
     st.session_state.pop(_PERSISTED_SESSION_AT_KEY, None)
+    return token
 
 
 def _next_user_id(connection: DatabaseConnection) -> str:

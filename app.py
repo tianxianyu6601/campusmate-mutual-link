@@ -19,6 +19,7 @@ from services.auth import (
     AuthError,
     clear_persistent_session,
     clear_session_cookie,
+    delete_login_session,
     persist_current_session_state,
     read_session_cookie,
     reset_password,
@@ -138,7 +139,7 @@ def _inject_login_shell_css() -> None:
 
 
 def _logout() -> None:
-    clear_persistent_session()
+    token_to_revoke = clear_persistent_session(revoke=False)
     for key, default_value in DEFAULT_SESSION_STATE.items():
         st.session_state[key] = (
             default_value.copy()
@@ -149,6 +150,8 @@ def _logout() -> None:
     # after the login page has rendered so Cloud latency cannot leave the old
     # authenticated page visible while the component is mounting.
     st.session_state["session_cookie_delete_pending"] = True
+    if token_to_revoke:
+        st.session_state["session_token_revoke_pending"] = token_to_revoke
 
 
 def _request_logout() -> None:
@@ -642,8 +645,12 @@ if is_authenticated:
 
 navigation.run()
 
-# Cookie components run after the destination page has drawn. This keeps the
-# visible transition immediate while preserving refresh-safe authentication.
+# Revoke the old server session and update the browser cookie only after the
+# destination page has drawn. This makes logout visibly immediate without
+# weakening the final server-side logout result.
+token_to_revoke = st.session_state.pop("session_token_revoke_pending", None)
+if token_to_revoke:
+    delete_login_session(str(token_to_revoke))
 if pending_cookie:
     write_session_cookie(pending_cookie)
 if st.session_state.pop("session_cookie_delete_pending", False):

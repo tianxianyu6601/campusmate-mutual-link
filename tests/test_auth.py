@@ -185,6 +185,21 @@ class AuthTests(unittest.TestCase):
             self.assertEqual((True, "component-token"), auth.read_session_cookie())
         self.assertIsNotNone(component.call_args.kwargs["on_result_change"])
 
+    def test_logout_can_detach_before_deferred_revocation(self) -> None:
+        session_state = {
+            "session_token": "opaque-token",
+            auth._VALIDATED_SESSION_TOKEN_KEY: "opaque-token",
+        }
+        with (
+            patch("services.auth.st.session_state", session_state),
+            patch("services.auth.delete_login_session") as delete_session,
+        ):
+            token = auth.clear_persistent_session(revoke=False)
+
+        self.assertEqual("opaque-token", token)
+        self.assertNotIn("session_token", session_state)
+        delete_session.assert_not_called()
+
     def test_require_login_redirects_when_session_is_missing(self) -> None:
         class FakeContext:
             cookies: dict[str, str] = {}
