@@ -1,0 +1,243 @@
+# CampusMate 重构发现与需求依据
+
+## 已确认需求
+
+- 登录前只出现注册、登录和重置密码。
+- 登录后出现三个核心板块：个人资料、自由组局、周期搭子匹配。
+- 个人资料包括基础身份、兴趣、性格类型、社交偏好、空闲时间、地点与隐私设置。
+- 自由组局由用户发布活动，其他已登录用户浏览并申请，发布者审核，批准后占用名额，满员后停止加入。
+- 活动申请和审批结果需要邮件通知。
+- 周期匹配由用户保存个人问卷并主动参加当前轮次，系统按每日或每周固定时间统一匹配。
+- 当前倾向每周一次，但具体时间仍待确认。
+
+## 截图中的产品发现
+
+### 组局广场
+
+- 顶部包含城市、关键词搜索、距离、时间和智能排序。
+- 分类标签用于快速筛选。
+- 活动卡包含封面、标题、分类、时间、地点、发起人、当前人数／总人数和活动状态。
+- 页面有明显的发布活动入口。
+
+### 发布活动
+
+- 第一步选择活动类型。
+- 类型分为交流、运动、娱乐、拼一切和自定义。
+- 第二步填写标题、详细描述、图片、时间、地点、人数、可见范围以及是否需要审核。
+
+### 活动分类
+
+- 交流：组队、学习、咨询、闲聊、Coffee Chat、交流会、读书会、舞会、社交酒会。
+- 运动：羽毛球、徒步、爬山、散步、健身、篮球、足球、排球、乒乓球、网球、游泳、骑行、跑步、飞盘、滑冰、滑雪、舞蹈、攀岩等。
+- 娱乐：旅游、剧本杀、桌游、麻将、约饭、扑克、小酌、唱歌、City Walk、探店、观演、电影、观展、下棋、游戏、摄影。
+- 拼一切：拼车、拼谷、拼单。
+- 自定义：允许用户输入其他活动类型。
+
+## TP Date 可借鉴的产品机制
+
+- 用户填写并保存问卷。
+- 用户每轮自主决定是否参加。
+- 固定时间截止报名，随后统一运行匹配。
+- 结果在固定时间公布，并展示匹配理由和用户允许公开的联系方式。
+- 保存的问卷可以在后续轮次继续使用。
+- CampusMate 应借鉴“固定轮次”，但保留现有学习、运动、兴趣三类搭子算法优势。
+
+## 技术与产品边界
+
+- 自由组局是即时、多人、申请审批制。
+- 周期匹配是批量、固定时间、算法分配制。
+- 二者共用用户与资料，但不应共用活动／轮次状态表。
+- 关键人数和权限逻辑必须放在服务端与数据库事务中。
+- 邮件是外部服务，业务数据应先可靠提交；邮件失败需要记录并重试。
+- 定时匹配不能依赖某位用户保持网页打开，需要可靠的外部调度入口。
+- 敏感联系方式需要字段级可见性，不能直接出现在活动广场。
+
+## 推荐 MVP 边界
+
+### 第一版必须有
+
+- 个人资料编辑与隐私设置
+- 活动发布、列表、详情、申请、审批、退出、取消、满员
+- 申请与审批邮件
+- 周期轮次、报名、截止、算法运行、结果、结果邮件
+- 我的活动／我的申请／我的匹配
+- 服务端权限和关键自动化测试
+
+### 第一版暂缓
+
+- 实时聊天
+- 精确地图与实时距离定位
+- 支付、AA 或订单核销
+- 复杂社交动态
+- 手机推送
+- 多层管理员后台
+
+## 待研究事项
+
+- Streamlit Cloud 数据持久化方案与备份策略
+- 定时匹配的具体调度平台和鉴权方式
+- 线上邮件供应商的额度、失败重试和退信处理
+- 图片上传后的持久化存储位置
+- 是否需要管理员处理举报和风险活动
+
+## 外部参考
+
+- 群像／群青组局截图：活动广场与两步发布流程。
+- TP Date：https://tpdate.com/
+- TP Date 入口结构：https://tpdate.com/intro
+- TP Date 轮次说明：https://tpdate.com/announcements/round-0423
+
+## 阶段 0：现有工程基线
+
+### Git 与运行环境
+
+- 当前分支为 `main`，本地 `HEAD` 与 `origin/main` 均指向 `972feb267244de9ae654e25d2e2f746a2c659852`（`Fix password reset dialog overlay`）。
+- 当前依赖约束为 `streamlit>=1.36,<2.0`、`networkx>=3,<4`；审计环境实际版本为 Streamlit `1.61.1`、NetworkX `3.6.1`。
+- 当前自动化基线为 63 项 `unittest` 测试全部通过，Python 编译检查通过。
+
+### 页面、登录与会话
+
+- `app.py` 使用 `st.navigation` 组织登录、首页、问卷、匹配、结果和 AI 洞察页面。
+- 业务页面统一调用 `require_login`，未登录用户不能直接进入现有业务页面。
+- 当前登录态只保存在 `st.session_state["auth_user"]`，没有刷新后恢复登录的持久会话机制。
+- 当前退出操作清空会话默认值并跳转登录页；后续仍需加入真实浏览器回归测试，覆盖单击登录、刷新和立即退出。
+
+### 数据库与邮件
+
+- 当前 SQLite 数据库完整性检查为 `ok`，`PRAGMA user_version = 0`。
+- 当前数据量：`users=2`、`verification_codes=1`、`user_profiles=0`、`notifications=0`、`login_sessions=9`。
+- `login_sessions` 是旧版本遗留表，当前代码未创建或使用该表；迁移时不得在未确认数据价值前直接删除。
+- 当前表结构缺少外键、检查约束、显式事务、迁移版本和并发写入策略。
+- 当前邮件层支持 SendGrid、Resend 和 SMTP；通知记录缺少队列、幂等键、失败重试和退信状态。
+- 真实密钥未提交到仓库，示例配置只包含占位值。
+
+### 可复用资产
+
+- 账号注册、验证码、密码哈希、登录认证和邮件供应商适配器可继续复用并加固。
+- 问卷元数据、资料构建器、硬过滤、双向评分、图匹配、全局匹配流水线、AI 解释和评估模块可复用。
+- 现有 63 项测试可作为后续重构的回归基线。
+- `user_profiles.profile_json` 可作为旧资料迁移来源，但不适合作为扩展资料、隐私和查询功能的最终结构。
+
+### 需要替换或升级的部分
+
+- 仅依赖 `st.session_state` 的登录态需要升级为可撤销、可过期、刷新可恢复的服务端会话。
+- SQLite 建表即初始化的方式需要升级为有版本号、可回滚、可测试的迁移流程。
+- 自由组局的名额审批必须使用数据库事务、唯一约束和服务端权限校验。
+- 邮件发送需要与业务提交解耦，通过任务状态、幂等键和可重试机制保证可靠性。
+- 旧式 `pages/` 路由与已弃用的 `use_container_width=True` 应在对应功能阶段逐步迁移，不在阶段 0 顺带改动。
+
+## 阶段 0：Streamlit Community Cloud 约束
+
+- 官方文档明确说明 Community Cloud 不保证本地文件持久性，应用本地保存的数据可能随时被删除。因此线上业务数据不能继续依赖仓库旁的 SQLite 文件。
+- 上传或运行时生成的本地文件同样不保证持久保存；活动图片需要外部对象存储或其他持久化服务。
+- 真实密钥应放在 Community Cloud 的 Advanced settings／Secrets 中，不能提交到 Git。
+- GitHub 推送会反映到线上应用，依赖变更会触发重新部署；后续每个发布阶段都应保留提交级回滚点。
+- Community Cloud 应用可能在无访问后休眠，页面进程不能承担可靠的每周定时匹配任务。
+
+### 官方依据
+
+- Streamlit 数据连接与本地文件限制：https://docs.streamlit.io/develop/concepts/connections/connecting-to-data
+- Streamlit Secrets 管理：https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/secrets-management
+- Streamlit 应用管理与更新：https://docs.streamlit.io/deploy/streamlit-community-cloud/manage-your-app
+- Streamlit 重启行为：https://docs.streamlit.io/deploy/streamlit-community-cloud/manage-your-app/reboot-your-app
+- Streamlit 静态文件持久性：https://docs.streamlit.io/develop/concepts/configuration/serving-static-files
+
+## 阶段 0：线上只读核对
+
+- `https://campusmate-mutual-link.streamlit.app/` 在 2026-08-08 可正常访问。
+- 页面显示 CampusMate 的“注册 / 登录”入口以及登录、注册、重置密码三种操作。
+- 本次只读浏览器检查未发现控制台错误。
+- 页面不公开构建 SHA，因此只能确认线上健康状态，不能仅凭页面证明精确部署提交；`972feb2` 是当前 Git 回滚基线。
+
+## 阶段 1：会话与导航设计依据
+
+- Streamlit 官方文档确认 `st.session_state` 绑定 WebSocket；浏览器刷新会创建新连接并重置会话状态。因此仅保存 `auth_user` 不能满足刷新保持登录。
+- Streamlit 的 `st.context.cookies` 只能读取新会话收到的 Cookie，不能直接写入 Cookie。
+- Streamlit 原生 `st.login`／`st.logout` 使用 OIDC 身份提供商和身份 Cookie，但当前 CampusMate 使用自建邮箱密码账号，阶段 1 不更换账号体系。
+- 仓库历史提交 `7f533c4` 曾使用 Streamlit 1.61 的 `st.html(..., unsafe_allow_javascript=True)` 写入浏览器 Cookie；该方案无需新增第三方依赖。
+- 阶段 1 采用服务端随机会话令牌：浏览器保存带 `Secure`（HTTPS）和 `SameSite=Strict` 的随机令牌，数据库仅保存 SHA-256 哈希；不再使用旧提交中暴露令牌的 URL 查询参数方案。
+- JavaScript 设置的 Cookie 无法标记 `HttpOnly`。当前只执行仓库内静态脚本并把令牌限制为随机值；阶段 2／9 仍需结合最终部署架构评估更强的服务端 Cookie 方案。
+
+### 官方依据
+
+- Streamlit Session State：https://docs.streamlit.io/develop/api-reference/caching-and-state/st.session_state
+- Streamlit Context Cookies：https://docs.streamlit.io/develop/api-reference/caching-and-state/st.context
+- Streamlit 原生认证：https://docs.streamlit.io/develop/concepts/connections/authentication
+
+## 阶段 1：本地浏览器验收结论
+
+- 测试账号一次点击登录后直接进入新首页。
+- 从首页进入组局广场后，浏览器刷新仍保持 `/activities` 且登录状态有效。
+- 点击退出一次后立即回到登录页，受保护导航消失。
+- 未登录直接访问个人资料、组局广场、周期匹配和消息页面时均看不到受保护内容。
+- 新首页三个核心入口按钮可见、可点击；周期匹配入口能进入现有三类行动卡选择。
+- 修复 Cookie 脚本作用域后，干净的完整浏览器回归控制台错误数为 0。
+
+## 阶段 2：数据库技术决策
+
+- 线上持久层采用标准 PostgreSQL `database_url`，兼容 Neon、Supabase 或其他托管 PostgreSQL；本地开发继续使用 SQLite。
+- Psycopg 官方建议通过连接上下文或显式事务确保正常提交、异常回滚；阶段 2 服务写操作统一使用事务上下文。
+- Psycopg 参数占位符为 `%s`，SQLite 为 `?`；数据库适配层负责转换，业务服务只使用参数化查询，不拼接用户输入。
+- PostgreSQL 与 SQLite 共用的核心结构使用文本 UUID、整数时间戳、`PRIMARY KEY`、`UNIQUE`、`CHECK` 和 `FOREIGN KEY`，避免依赖供应商专属自增语法。
+- PostgreSQL 行结果使用 Psycopg `dict_row`，与 SQLite 的 `sqlite3.Row` 保持相同的按列名访问方式。
+- 第一版不启用常驻连接池，先使用短连接事务保证资源及时释放；流量和部署稳定后再评估 `psycopg_pool`。
+
+### 官方依据
+
+- Psycopg 基础用法：https://www.psycopg.org/psycopg3/docs/basic/usage.html
+- Psycopg 事务：https://www.psycopg.org/psycopg3/docs/basic/transactions.html
+- Psycopg 字典行：https://www.psycopg.org/psycopg3/docs/advanced/rows.html
+- PostgreSQL 约束：https://www.postgresql.org/docs/current/ddl-constraints.html
+
+## 阶段 2：本地实现结论
+
+- 当前本地库已安全升级到 `schema_version=2`，迁移只新增结构和索引，没有删除旧账号、旧问卷或登录会话。
+- 旧 SQLite 中有 2 个账号、0 份旧算法资料、0 条旧通知；导入工具默认只报告数量，不打印邮箱。
+- 服务层与数据库约束共同覆盖：重复申请、重复入组、超员批准和非发起人越权操作。
+- 活动容量包含发起人；容量为 2 时只能再批准 1 名成员。
+- 每次周期匹配报名都会冻结一份资料快照，避免用户之后修改资料导致已经开始的轮次输入变化。
+- 邮件不在活动事务内同步发送；事务只写入带唯一幂等键的 `email_tasks`，后续阶段再由发送器重试处理。
+- 本地回归确认数据库改造没有破坏阶段 1 的登录行为：一次点击登录、刷新保持 `/activities`、一次点击退出。
+- 当前环境未配置 `database_url`，所以 PostgreSQL 方言和真实托管连接仍需在获得连接串后做集成验收；不能把 SQLite 测试通过等同于线上数据库已经接通。
+
+## 阶段 3：个人资料实现结论
+
+- 资料完整度必须在服务端计算；若相信页面传入的百分比，用户可绕过周期匹配资料门槛。
+- 周期报名入口同样必须重新检查必填资料，页面上的“已满足要求”只能作为提示，不能作为权限依据。
+- 头像暂以小体积 Data URL 入库，适合课程 MVP 和 PostgreSQL 统一迁移；服务端限制格式、文件签名及 750 KB。若后续允许活动大图，应改用外部对象存储。
+- 隐私不是前端隐藏控件：`get_visible_profile` 根据真实共同活动成员和匹配结果在服务层删除无权查看的字段。
+- 兴趣表增加 `share` 分类需要重建 SQLite CHECK 约束；迁移先复制旧数据再替换表，保留已有标签。
+- 资料页使用 Streamlit 原生表单、标签页、pills、multiselect 和 uploader，保存一次后统一 rerun，避免控件逐项写库。
+- 本地测试账号刷新后仍保留资料，说明阶段 1 的持久登录会话与阶段 3 的数据库持久化可以协同工作。
+- 线上部署仍取决于托管 PostgreSQL；本地成功不能替代线上持久化验收。
+
+## 阶段 4：Streamlit 实现约束
+
+- 使用原生 `st.form` 批量提交活动字段，以 `st.session_state` 保存两步发布流程的当前步骤；数据库仍是唯一持久化来源。
+- 使用 `st.segmented_control` 和 `st.pills` 呈现少量固定筛选，避免横向 radio；所有筛选值和活动字段仍须在服务层重新校验。
+- 活动卡用原生带边框容器和固定比例列实现，不注入页面 CSS；按钮使用稳定键，避免列表 rerun 时状态串位。
+- 页面文件继续作为直接脚本，活动查询、可见性和状态写入放在 `services/platform_service.py`，不在前端拼接 SQL。
+- 阶段 4 只实现浏览、详情、发布与发布者状态管理；申请、审批、成员退出和邮件属于阶段 5，不能提前实现。
+- 组局广场的首要操作不应放在固定比例标题列最右侧；在 1280 像素视口下容易接近裁切边界，标题下的原生主按钮更稳健。
+
+## 阶段 4：本地验收结论
+
+- 活动详情使用查询参数比只用 session state 更适合刷新保留；登录恢复后仍能按活动 ID 重新从数据库加载。
+- 发现列表只展示 `published/full/ended`，草稿和取消活动只进入发起人的“我的活动”，避免误公开未完成内容。
+- 邀请可见性必须在列表和详情服务中同时校验；只在列表隐藏仍可能被直接 URL 绕过。
+- 活动编辑在事务内核对发起人、当前状态、成员数和版本号，避免旧页面覆盖新修改或把人数调到成员数以下。
+- 阶段 4 本地浏览器已验证草稿、发布、编辑、结束和取消；申请与审批入口没有提前暴露，边界保持在阶段 5。
+
+## 阶段 5：实施边界
+
+- 所有申请、审批、退出、移除和取消必须先提交数据库事务，再由持久任务异步发邮件；外部邮件故障不得反向破坏业务状态。
+- 浏览器测试使用用户授权的测试账号；跨账号并发、越权和邮件幂等场景使用临时测试数据库，避免随意创建线上或本地持久账号。
+- 阶段 5 可以在活动详情中加入申请与成员管理，但不扩展周期匹配、消息中心聚合或管理员后台。
+
+## 阶段 5：最终结论
+
+- `activity_applications.attempt_count` 让撤回后重新申请拥有独立通知幂等键，同时继续保留每个用户每场活动唯一一条申请记录。
+- 审核、免审核直接入组、退出和移除都锁定活动行并在同一事务中重查成员数；SQLite 并发测试证明最后一个名额不会被重复批准。
+- 活动站内消息使用独立 `user_notifications`，不复用旧的周期匹配 `notifications` 表，避免两套状态模型互相污染。
+- `email_tasks` 是业务事务的一部分，但实际发信在事务提交后完成；失败进入 `failed/dead` 状态并保留重试时间，不影响申请与成员状态。
+- 阶段 5 只在消息页展示活动通知，没有提前实现阶段 8 的周期匹配汇总、历史中心或邮件偏好管理。

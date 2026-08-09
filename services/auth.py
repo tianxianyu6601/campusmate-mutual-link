@@ -8,7 +8,6 @@ import json
 import re
 import secrets
 import smtplib
-import sqlite3
 import ssl
 import time
 import urllib.error
@@ -20,11 +19,24 @@ from typing import Any, Mapping
 
 import streamlit as st
 
+from services.database import DatabaseConnection, transaction
+from services.migrations import run_migrations
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DB_PATH = PROJECT_ROOT / "campusmate_app.db"
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 CODE_TTL_SECONDS = 10 * 60
+SESSION_TTL_SECONDS = 7 * 24 * 60 * 60
+SESSION_COOKIE_NAME = "cm_session"
+PERSISTED_SESSION_KEYS = (
+    "selected_match_type",
+    "questionnaire_answers",
+    "current_profile",
+    "matching_run",
+    "current_match",
+    "feedback_records",
+)
 MAIL_SYSTEM_VERSION = "mail-auto-fallback-2026-08-08-2"
 MAIL_USER_AGENT = "CampusMate/1.0 (Streamlit Cloud; mail verification)"
 SMTP_CLOUD_FAILURE_ADVICE = (
@@ -42,54 +54,17 @@ class MailNotConfigured(RuntimeError):
     """Raised when SMTP settings are missing."""
 
 
-def _connect() -> sqlite3.Connection:
-    connection = sqlite3.connect(DB_PATH)
-    connection.row_factory = sqlite3.Row
-    return connection
-
-
 @contextmanager
-def _db() -> sqlite3.Connection:
-    connection = _connect()
-    try:
+def _db() -> DatabaseConnection:
+    with transaction(DB_PATH) as connection:
         yield connection
-        connection.commit()
-    finally:
-        connection.close()
 
 
 def init_db() -> None:
+    run_migrations(DB_PATH)
     with _db() as connection:
-        connection.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS users (
-                email TEXT PRIMARY KEY,
-                user_id TEXT UNIQUE NOT NULL,
-                password_hash TEXT NOT NULL,
-                salt TEXT NOT NULL,
-                verified INTEGER NOT NULL DEFAULT 0,
-                created_at INTEGER NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS verification_codes (
-                email TEXT PRIMARY KEY,
-                code_hash TEXT NOT NULL,
-                expires_at INTEGER NOT NULL,
-                attempts INTEGER NOT NULL DEFAULT 0
-            );
-            CREATE TABLE IF NOT EXISTS user_profiles (
-                email TEXT PRIMARY KEY,
-                profile_json TEXT NOT NULL,
-                updated_at INTEGER NOT NULL
-            );
-            CREATE TABLE IF NOT EXISTS notifications (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                recipient_email TEXT NOT NULL,
-                match_id TEXT NOT NULL,
-                status TEXT NOT NULL,
-                message TEXT NOT NULL,
-                created_at INTEGER NOT NULL
-            );
-            """
+        connection.execute(
+            "DELETE FROM login_sessions WHERE expires_at < ?", (int(time.time()),)
         )
 
 
@@ -119,7 +94,252 @@ def _hash_code(code: str) -> str:
     return hashlib.sha256(code.encode("utf-8")).hexdigest()
 
 
-def _next_user_id(connection: sqlite3.Connection) -> str:
+def _hash_session_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _serializable_session_payload(state: Mapping[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    for key in PERSISTED_SESSION_KEYS:
+        if key not in state:
+            continue
+        value = state[key]
+        try:
+            json.dumps(value, ensure_ascii=False)
+        except (TypeError, ValueError):
+            continue
+        payload[key] = value
+    return payload
+
+
+def _current_session_token() -> str | None:
+    token = st.session_state.get("session_token")
+    if token:
+        return str(token)
+    try:
+        cookie_value = st.context.cookies.get(SESSION_COOKIE_NAME)
+    except Exception:
+        cookie_value = None
+    return str(cookie_value) if cookie_value else None
+
+
+def write_session_cookie(token: str, *, redirect_to: str | None = None) -> None:
+    """Write the opaque browser token and optionally start a fresh page session."""
+
+    token_json = json.dumps(str(token))
+    name_json = json.dumps(SESSION_COOKIE_NAME)
+    redirect_json = json.dumps(redirect_to)
+    st.html(
+        f"""
+        <span style="display:none" aria-hidden="true"></span>
+        <script>
+          (() => {{
+            const campusMateCookieName = {name_json};
+            const campusMateToken = {token_json};
+            const campusMateRedirectTo = {redirect_json};
+            const campusMateSecure = window.location.protocol === "https:" ? "; Secure" : "";
+            document.cookie = `${{campusMateCookieName}}=${{encodeURIComponent(campusMateToken)}}; Max-Age={SESSION_TTL_SECONDS}; Path=/; SameSite=Strict${{campusMateSecure}}`;
+            if (campusMateRedirectTo) {{
+              window.setTimeout(() => window.location.replace(campusMateRedirectTo), 25);
+            }}
+          }})();
+        </script>
+        """,
+        width="content",
+        unsafe_allow_javascript=True,
+    )
+
+
+def clear_session_cookie(*, redirect_to: str | None = None) -> None:
+    """Remove the browser token and optionally return to a clean login session."""
+
+    name_json = json.dumps(SESSION_COOKIE_NAME)
+    redirect_json = json.dumps(redirect_to)
+    st.html(
+        f"""
+        <span style="display:none" aria-hidden="true"></span>
+        <script>
+          (() => {{
+            const campusMateCookieName = {name_json};
+            const campusMateRedirectTo = {redirect_json};
+            const campusMateSecure = window.location.protocol === "https:" ? "; Secure" : "";
+            document.cookie = `${{campusMateCookieName}}=; Max-Age=0; Path=/; SameSite=Strict${{campusMateSecure}}`;
+            if (campusMateRedirectTo) {{
+              window.setTimeout(() => window.location.replace(campusMateRedirectTo), 25);
+            }}
+          }})();
+        </script>
+        """,
+        width="content",
+        unsafe_allow_javascript=True,
+    )
+
+
+def create_login_session(
+    user: Mapping[str, str],
+    state: Mapping[str, Any] | None = None,
+) -> str:
+    """Create a refresh-safe server session and return its opaque browser token."""
+
+    init_db()
+    email = normalize_email(str(user["email"]))
+    now = int(time.time())
+    token = secrets.token_urlsafe(32)
+    state_json = json.dumps(
+        _serializable_session_payload(state or {}),
+        ensure_ascii=False,
+    )
+    with _db() as connection:
+        row = connection.execute(
+            "SELECT email FROM users WHERE email = ? AND verified = 1",
+            (email,),
+        ).fetchone()
+        if row is None:
+            raise AuthError("登录用户不存在或尚未完成验证")
+        connection.execute(
+            """
+            INSERT INTO login_sessions(
+                session_token_hash, email, state_json, created_at, updated_at, expires_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                _hash_session_token(token),
+                email,
+                state_json,
+                now,
+                now,
+                now + SESSION_TTL_SECONDS,
+            ),
+        )
+    return token
+
+
+def load_login_session(token: str) -> dict[str, Any] | None:
+    init_db()
+    token = str(token).strip()
+    if not token:
+        return None
+    token_hash = _hash_session_token(token)
+    now = int(time.time())
+    with _db() as connection:
+        row = connection.execute(
+            """
+            SELECT s.state_json, s.expires_at, u.email, u.user_id
+            FROM login_sessions AS s
+            JOIN users AS u ON u.email = s.email
+            WHERE s.session_token_hash = ? AND u.verified = 1
+            """,
+            (token_hash,),
+        ).fetchone()
+        if row is None:
+            return None
+        if int(row["expires_at"]) < now:
+            connection.execute(
+                "DELETE FROM login_sessions WHERE session_token_hash = ?",
+                (token_hash,),
+            )
+            return None
+        connection.execute(
+            """
+            UPDATE login_sessions
+            SET updated_at = ?, expires_at = ?
+            WHERE session_token_hash = ?
+            """,
+            (now, now + SESSION_TTL_SECONDS, token_hash),
+        )
+
+    try:
+        state = json.loads(str(row["state_json"]))
+    except json.JSONDecodeError:
+        state = {}
+    if not isinstance(state, dict):
+        state = {}
+    return {
+        "auth_user": {"email": str(row["email"]), "user_id": str(row["user_id"])},
+        "state": _serializable_session_payload(state),
+    }
+
+
+def save_login_session_state(token: str, state: Mapping[str, Any]) -> None:
+    init_db()
+    token = str(token).strip()
+    if not token:
+        return
+    now = int(time.time())
+    with _db() as connection:
+        connection.execute(
+            """
+            UPDATE login_sessions
+            SET state_json = ?, updated_at = ?, expires_at = ?
+            WHERE session_token_hash = ? AND expires_at >= ?
+            """,
+            (
+                json.dumps(_serializable_session_payload(state), ensure_ascii=False),
+                now,
+                now + SESSION_TTL_SECONDS,
+                _hash_session_token(token),
+                now,
+            ),
+        )
+
+
+def delete_login_session(token: str) -> None:
+    init_db()
+    token = str(token).strip()
+    if not token:
+        return
+    with _db() as connection:
+        connection.execute(
+            "DELETE FROM login_sessions WHERE session_token_hash = ?",
+            (_hash_session_token(token),),
+        )
+
+
+def start_persistent_session(user: Mapping[str, str]) -> str:
+    token = create_login_session(user, dict(st.session_state))
+    st.session_state["session_token"] = token
+    return token
+
+
+def restore_persistent_session() -> bool:
+    token = _current_session_token()
+    if not token:
+        return bool(st.session_state.get("auth_user"))
+
+    restored = load_login_session(token)
+    if restored is None:
+        st.session_state.pop("session_token", None)
+        st.session_state.pop("auth_user", None)
+        return False
+
+    st.session_state["session_token"] = token
+    if not st.session_state.get("auth_user"):
+        st.session_state["auth_user"] = restored["auth_user"]
+        for key, value in restored["state"].items():
+            st.session_state[key] = value
+    return True
+
+
+def persist_current_session_state() -> None:
+    user = st.session_state.get("auth_user")
+    if not user:
+        return
+    token = _current_session_token()
+    if not token:
+        token = start_persistent_session(dict(user))
+    st.session_state["session_token"] = token
+    save_login_session_state(token, dict(st.session_state))
+
+
+def clear_persistent_session() -> None:
+    token = _current_session_token()
+    if token:
+        delete_login_session(token)
+    st.session_state.pop("session_token", None)
+
+
+def _next_user_id(connection: DatabaseConnection) -> str:
     rows = connection.execute("SELECT user_id FROM users").fetchall()
     numbers = [
         int(row["user_id"][1:])
@@ -589,7 +809,9 @@ def send_password_reset_code(email: str) -> str | None:
     return None
 
 
-def _consume_verification_code(connection: sqlite3.Connection, email: str, code: str) -> None:
+def _consume_verification_code(
+    connection: DatabaseConnection, email: str, code: str
+) -> None:
     row = connection.execute(
         "SELECT code_hash, expires_at, attempts FROM verification_codes WHERE email = ?",
         (email,),
@@ -731,17 +953,32 @@ def send_match_notification(
         message = f"匹配通知邮件发送失败：{error}"
     init_db()
     with _db() as connection:
+        next_notification_id = int(
+            connection.execute(
+                "SELECT COALESCE(MAX(id), 0) + 1 AS next_id FROM notifications"
+            ).fetchone()["next_id"]
+        )
         connection.execute(
             """
-            INSERT INTO notifications(recipient_email, match_id, status, message, created_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO notifications(
+                id, recipient_email, match_id, status, message, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
-            (normalize_email(recipient_email), match_id, status, message, int(time.time())),
+            (
+                next_notification_id,
+                normalize_email(recipient_email),
+                match_id,
+                status,
+                message,
+                int(time.time()),
+            ),
         )
     return status
 
 
 def require_login() -> dict[str, str]:
+    restore_persistent_session()
     user = st.session_state.get("auth_user")
     if not user:
         st.switch_page("pages/login.py")

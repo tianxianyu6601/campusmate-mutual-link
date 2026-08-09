@@ -6,4 +6,5 @@ __pycache__/
 .venv/
 venv/
 campusmate_app.db
+.local_backups/
 .streamlit/secrets.toml

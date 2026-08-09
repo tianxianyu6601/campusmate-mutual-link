@@ -14,6 +14,8 @@ from services.auth import (
     reset_password,
     send_password_reset_code,
     send_verification_code,
+    start_persistent_session,
+    write_session_cookie,
 )
 
 
@@ -125,11 +127,14 @@ with st.container(key="login_shell"):
 
             if submitted:
                 try:
-                    st.session_state.auth_user = authenticate(email, password)
+                    user = authenticate(email, password)
+                    st.session_state.auth_user = user
+                    token = start_persistent_session(user)
                 except AuthError as error:
                     st.error(str(error))
                 else:
-                    st.switch_page("pages/home.py")
+                    write_session_cookie(token, redirect_to="/")
+                    st.stop()
 
             if st.button("忘记密码？点击重置"):
                 st.session_state.login_mode_next = "重置密码"

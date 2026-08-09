@@ -1,85 +1,69 @@
-"""CampusMate landing page and match-type selection."""
+"""Authenticated CampusMate home and three-module entry page."""
 
 from __future__ import annotations
 
 import streamlit as st
 
 from services.auth import require_login
-from services.i18n import CHINESE, MATCH_TYPES_EN, tr
 
 
-MATCH_TYPES = (
+PORTALS = (
     {
-        "value": "study",
-        "icon": "📚",
-        "title": "学习搭子",
+        "key": "profile",
+        "icon": "👤",
+        "title": "个人资料",
+        "description": "设置你的兴趣、性格、空闲时间和社交偏好。",
+        "path": "pages/profile.py",
+        "status": "可编辑 · 已保存",
     },
     {
-        "value": "sport",
-        "icon": "🏃",
-        "title": "运动搭子",
+        "key": "activities",
+        "icon": "🎉",
+        "title": "自由组局",
+        "description": "浏览校园活动，或发布一场你想发起的组局。",
+        "path": "pages/activities.py",
+        "status": "发布、申请与审核可用",
     },
     {
-        "value": "interest",
-        "icon": "🎨",
-        "title": "兴趣活动搭子",
+        "key": "cycle_match",
+        "icon": "🔄",
+        "title": "周期搭子匹配",
+        "description": "提交搭子偏好，参加固定轮次的统一匹配。",
+        "path": "pages/cycle_match.py",
+        "status": "现有匹配可用",
     },
 )
 
 
-def _clear_questionnaire_state() -> None:
-    """Discard answers that would be invalid after changing scenario."""
-
-    for key in list(st.session_state):
-        if key.startswith("question_"):
-            del st.session_state[key]
-    st.session_state.questionnaire_answers = {}
-    st.session_state.current_profile = None
-    st.session_state.matching_run = None
-    st.session_state.current_match = None
+def _open_portal(path: str) -> None:
+    st.switch_page(path)
 
 
-def _select_match_type(match_type: str) -> None:
-    if st.session_state.get("selected_match_type") != match_type:
-        _clear_questionnaire_state()
-    st.session_state.selected_match_type = match_type
-    st.switch_page("pages/questionnaire.py")
-
-
-language = st.session_state.get("language", CHINESE)
-require_login()
+user = require_login()
 
 st.title("CampusMate")
-st.markdown(
-    f"""
-    <p class="campusmate-muted" style="font-size:1.15rem; max-width:760px; line-height:1.75;">
-      {tr(language, "让每一次匹配，都能变成一次真实行动", "Turn every match into real action")}
-    </p>
-    """,
-    unsafe_allow_html=True,
-)
+st.markdown("### 今天想从哪里开始？")
+st.caption(f"已登录为 {user['email']}。三个板块共享账号，但各自保留独立的业务流程。")
 
-st.markdown(f"### {tr(language, '你正在寻找：', 'You are looking for:')}")
 columns = st.columns(3, gap="large")
-
-for column, match_type in zip(columns, MATCH_TYPES):
+for column, portal in zip(columns, PORTALS):
     with column:
-        with st.container(border=True, key=f"mate_card_{match_type['value']}"):
-            st.markdown(
-                f"""
-                <div class="mate-card-icon">{match_type['icon']}</div>
-                """,
-                unsafe_allow_html=True,
-            )
-            title = (
-                MATCH_TYPES_EN[match_type["value"]]
-                if language != CHINESE
-                else match_type["title"]
-            )
+        with st.container(border=True, key=f"portal_card_{portal['key']}"):
+            st.markdown(f"# {portal['icon']}")
+            st.subheader(portal["title"])
+            st.write(portal["description"])
+            st.caption(portal["status"])
             if st.button(
-                title,
-                key=f"select_{match_type['value']}",
-                use_container_width=True,
-                type="secondary",
+                f"进入{portal['title']}",
+                key=f"open_{portal['key']}",
+                type="primary",
+                width="stretch",
             ):
-                _select_match_type(match_type["value"])
+                _open_portal(portal["path"])
+
+st.divider()
+st.info(
+    "个人资料现已支持完整编辑和隐私设置；自由组局已支持浏览、发布、申请、审核和成员管理。"
+    "原有问卷与搭子算法已归入“周期搭子匹配”，可以继续使用。",
+    icon="ℹ️",
+)

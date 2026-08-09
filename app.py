@@ -15,7 +15,15 @@ from typing import Any
 
 import streamlit as st
 
-from services.auth import AuthError, reset_password, send_password_reset_code
+from services.auth import (
+    AuthError,
+    clear_persistent_session,
+    clear_session_cookie,
+    persist_current_session_state,
+    reset_password,
+    restore_persistent_session,
+    send_password_reset_code,
+)
 from services.i18n import CHINESE
 
 
@@ -43,12 +51,26 @@ def _initialise_session_state() -> None:
             st.session_state[key] = default_value.copy() if isinstance(default_value, dict) else default_value
 
 
-def _available_pages() -> list[st.Page]:
-    """Build navigation while allowing later modules to be added incrementally."""
+def _available_pages(is_authenticated: bool) -> list[st.Page]:
+    """Build the public login route and authenticated CampusMate page map."""
 
     pages = [
-        st.Page("pages/login.py", title="登录", icon="🔐", default=True),
-        st.Page("pages/home.py", title="首页", icon="🏠"),
+        st.Page(
+            "pages/login.py",
+            title="登录",
+            icon="🔐",
+            default=not is_authenticated,
+        ),
+        st.Page(
+            "pages/home.py",
+            title="首页",
+            icon="🏠",
+            default=is_authenticated,
+        ),
+        st.Page("pages/profile.py", title="个人资料", icon="👤"),
+        st.Page("pages/activities.py", title="组局广场", icon="🎉"),
+        st.Page("pages/cycle_match.py", title="周期匹配", icon="🔄"),
+        st.Page("pages/messages.py", title="我的消息", icon="🔔"),
         st.Page("pages/questionnaire.py", title="填写行动卡", icon="📝"),
     ]
 
@@ -90,13 +112,19 @@ def _inject_login_shell_css() -> None:
 
 
 def _logout() -> None:
+    clear_persistent_session()
     for key, default_value in DEFAULT_SESSION_STATE.items():
         st.session_state[key] = (
             default_value.copy()
             if isinstance(default_value, dict)
             else default_value
         )
-    st.switch_page("pages/login.py")
+    clear_session_cookie(redirect_to="/")
+    st.stop()
+
+
+def _request_logout() -> None:
+    st.session_state["logout_requested"] = True
 
 
 @st.dialog("重置密码")
@@ -329,6 +357,7 @@ st.markdown(
       .campusmate-muted {
         color: #111111 !important;
       }
+      div[class*="st-key-portal_card_"],
       div[class*="st-key-mate_card_"] {
         background: #ffffff !important;
         border: 2px solid #111111 !important;
@@ -344,14 +373,19 @@ st.markdown(
         line-height: 1.2;
         min-height: 7.5rem;
       }
+      div[class*="st-key-portal_card_"] div[data-testid="stButton"] > button,
       div[class*="st-key-mate_card_"] div[data-testid="stButton"] > button {
         background: #111111 !important;
         border: 2px solid #111111 !important;
         color: #ffffff !important;
       }
-      div[class*="st-key-mate_card_"] div[data-testid="stButton"] > button p {
+      div[class*="st-key-portal_card_"] div[data-testid="stButton"] > button p,
+      div[class*="st-key-portal_card_"] div[data-testid="stButton"] > button span,
+      div[class*="st-key-mate_card_"] div[data-testid="stButton"] > button p,
+      div[class*="st-key-mate_card_"] div[data-testid="stButton"] > button span {
         color: #ffffff !important;
       }
+      div[class*="st-key-portal_card_"] div[data-testid="stButton"] > button:hover,
       div[class*="st-key-mate_card_"] div[data-testid="stButton"] > button:hover {
         background: #333333 !important;
         border-color: #333333 !important;
@@ -362,11 +396,16 @@ st.markdown(
 )
 
 _initialise_session_state()
-
-available_pages = _available_pages()
-navigation = st.navigation(available_pages, position="hidden")
+if st.session_state.pop("logout_requested", False):
+    _logout()
+restore_persistent_session()
 
 is_authenticated = bool(st.session_state.get("auth_user"))
+if is_authenticated:
+    persist_current_session_state()
+
+available_pages = _available_pages(is_authenticated)
+navigation = st.navigation(available_pages, position="hidden")
 
 if not is_authenticated:
     _inject_login_shell_css()
@@ -382,44 +421,44 @@ if is_authenticated:
             if st.button("重置密码", key="open_reset_password_dialog"):
                 _reset_password_dialog(current_email)
         with logout_col:
-            if st.button("退出登录", key="logout_button"):
-                _logout()
+            st.button(
+                "退出登录",
+                key="logout_button",
+                on_click=_request_logout,
+            )
 
         st.page_link(
             "pages/home.py",
             label="首页",
             icon="🏠",
-            use_container_width=True,
+            width="stretch",
         )
         st.page_link(
-            "pages/questionnaire.py",
-            label="填写行动卡",
-            icon="📝",
-            use_container_width=True,
+            "pages/profile.py",
+            label="个人资料",
+            icon="👤",
+            width="stretch",
         )
-        if (PROJECT_ROOT / "pages" / "matching.py").exists():
-            st.page_link(
-                "pages/matching.py",
-                label="开始匹配",
-                icon="🔎",
-                use_container_width=True,
-            )
-        if (PROJECT_ROOT / "pages" / "result.py").exists():
-            st.page_link(
-                "pages/result.py",
-                label="匹配结果",
-                icon="✨",
-                use_container_width=True,
-            )
-        if (PROJECT_ROOT / "pages" / "ai_insights.py").exists():
-            st.page_link(
-                "pages/ai_insights.py",
-                label="AI 洞察",
-                icon="💡",
-                use_container_width=True,
-            )
+        st.page_link(
+            "pages/activities.py",
+            label="组局广场",
+            icon="🎉",
+            width="stretch",
+        )
+        st.page_link(
+            "pages/cycle_match.py",
+            label="周期匹配",
+            icon="🔄",
+            width="stretch",
+        )
+        st.page_link(
+            "pages/messages.py",
+            label="我的消息",
+            icon="🔔",
+            width="stretch",
+        )
         st.divider()
-        st.markdown("**MutualLink Created**")
+        st.markdown("**当前搭子偏好**")
         selected_type = st.session_state.get("selected_match_type")
         type_icons = {"study": "📚", "sport": "🏃", "interest": "🎨"}
         type_labels_zh = {

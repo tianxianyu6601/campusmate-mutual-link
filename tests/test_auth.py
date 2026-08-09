@@ -35,9 +35,111 @@ class AuthTests(unittest.TestCase):
         with self.assertRaises(auth.AuthError):
             auth.authenticate("person@example.com", "wrong-password")
 
+    def test_login_session_round_trips_saved_state(self) -> None:
+        code = auth.send_verification_code("person@example.com")
+        user = auth.register_user("person@example.com", "password123", str(code))
+
+        token = auth.create_login_session(
+            user,
+            {
+                "selected_match_type": "study",
+                "questionnaire_answers": {"match_type": "study"},
+                "ignored_key": "not persisted",
+            },
+        )
+        restored = auth.load_login_session(token)
+
+        self.assertIsNotNone(restored)
+        assert restored is not None
+        self.assertEqual(user, restored["auth_user"])
+        self.assertEqual("study", restored["state"]["selected_match_type"])
+        self.assertEqual(
+            {"match_type": "study"},
+            restored["state"]["questionnaire_answers"],
+        )
+        self.assertNotIn("ignored_key", restored["state"])
+
+        auth.save_login_session_state(
+            token,
+            {
+                "selected_match_type": "sport",
+                "current_profile": {"user_id": user["user_id"]},
+                "not_json": object(),
+            },
+        )
+        updated = auth.load_login_session(token)
+
+        self.assertIsNotNone(updated)
+        assert updated is not None
+        self.assertEqual("sport", updated["state"]["selected_match_type"])
+        self.assertNotIn("not_json", updated["state"])
+
+        auth.delete_login_session(token)
+        self.assertIsNone(auth.load_login_session(token))
+
+    def test_restore_persistent_session_reads_browser_cookie(self) -> None:
+        code = auth.send_verification_code("person@example.com")
+        user = auth.register_user("person@example.com", "password123", str(code))
+        token = auth.create_login_session(
+            user,
+            {"selected_match_type": "interest"},
+        )
+
+        class FakeContext:
+            cookies = {auth.SESSION_COOKIE_NAME: token}
+
+        session_state: dict[str, object] = {}
+        with (
+            patch("services.auth.st.session_state", session_state),
+            patch("services.auth.st.context", FakeContext()),
+        ):
+            restored = auth.restore_persistent_session()
+
+        self.assertTrue(restored)
+        self.assertEqual(user, session_state["auth_user"])
+        self.assertEqual(token, session_state["session_token"])
+        self.assertEqual("interest", session_state["selected_match_type"])
+
+    def test_revoked_session_clears_existing_auth_state(self) -> None:
+        code = auth.send_verification_code("person@example.com")
+        user = auth.register_user("person@example.com", "password123", str(code))
+        token = auth.create_login_session(user)
+        auth.delete_login_session(token)
+
+        class FakeContext:
+            cookies = {auth.SESSION_COOKIE_NAME: token}
+
+        session_state: dict[str, object] = {
+            "auth_user": user,
+            "session_token": token,
+        }
+        with (
+            patch("services.auth.st.session_state", session_state),
+            patch("services.auth.st.context", FakeContext()),
+        ):
+            restored = auth.restore_persistent_session()
+
+        self.assertFalse(restored)
+        self.assertNotIn("auth_user", session_state)
+        self.assertNotIn("session_token", session_state)
+
+    def test_cookie_writer_uses_secure_browser_attributes(self) -> None:
+        with patch("services.auth.st.html") as html:
+            auth.write_session_cookie("opaque-token", redirect_to="/")
+
+        html_markup = html.call_args.args[0]
+        self.assertIn("SameSite=Strict", html_markup)
+        self.assertIn("; Secure", html_markup)
+        self.assertIn("Max-Age=604800", html_markup)
+        self.assertTrue(html.call_args.kwargs["unsafe_allow_javascript"])
+
     def test_require_login_redirects_when_session_is_missing(self) -> None:
+        class FakeContext:
+            cookies: dict[str, str] = {}
+
         with (
             patch("services.auth.st.session_state", {}),
+            patch("services.auth.st.context", FakeContext()),
             patch("services.auth.st.switch_page") as switch_page,
             patch("services.auth.st.stop", side_effect=RuntimeError("stopped")),
         ):
