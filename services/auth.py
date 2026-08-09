@@ -203,6 +203,7 @@ def read_session_cookie() -> tuple[bool, str | None]:
         key="campusmate_session_cookie_reader",
         width=0,
         height=0,
+        on_result_change=lambda: None,
     )
     result = component_result.result or {}
     ready = bool(result.get("ready"))

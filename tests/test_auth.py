@@ -181,8 +181,9 @@ class AuthTests(unittest.TestCase):
     def test_session_cookie_reader_returns_component_token(self) -> None:
         result = Mock()
         result.result = {"ready": True, "token": "component-token"}
-        with patch("services.auth._SESSION_COOKIE_COMPONENT", return_value=result):
+        with patch("services.auth._SESSION_COOKIE_COMPONENT", return_value=result) as component:
             self.assertEqual((True, "component-token"), auth.read_session_cookie())
+        self.assertIsNotNone(component.call_args.kwargs["on_result_change"])
 
     def test_require_login_redirects_when_session_is_missing(self) -> None:
         class FakeContext:
