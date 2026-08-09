@@ -3,6 +3,5 @@
 # st.html JavaScript opt-in and the read-only st.context.cookies API.
 # The upper bound prevents an unreviewed major-version upgrade.
 streamlit>=1.61,<2.0
-extra-streamlit-components==0.1.81
 networkx>=3,<4
 psycopg[binary,pool]>=3.2,<4

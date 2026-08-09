@@ -10,13 +10,10 @@ Individual pages consume the stable interfaces delivered by Part 1.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-import extra_streamlit_components as stx
 import streamlit as st
-from extra_streamlit_components.CookieManager import _component_func as cookie_component
 
 from services.auth import (
     AuthError,
@@ -471,34 +468,6 @@ st.markdown(
 )
 
 _initialise_session_state()
-cookie_manager = st.session_state.get("_browser_cookie_manager")
-if cookie_manager is None:
-    browser_cookies = cookie_component(
-        method="getAll",
-        key="campusmate_cookie_reader",
-        default=None,
-    )
-    if browser_cookies is None:
-        # Ensure getAll has a truthy result even in a brand-new browser. The
-        # component's frontend does not emit an empty cookie dictionary.
-        cookie_component(
-            method="set",
-            cookie="cm_cookie_ready",
-            value="1",
-            options={
-                "path": "/",
-                "expires": (datetime.now() + timedelta(days=30)).isoformat(),
-                "sameSite": "strict",
-            },
-            key="campusmate_cookie_bootstrap",
-            default=False,
-        )
-        st.stop()
-    cookie_manager = object.__new__(stx.CookieManager)
-    cookie_manager.cookie_manager = cookie_component
-    cookie_manager.cookies = dict(browser_cookies)
-    st.session_state["_browser_cookie_manager"] = cookie_manager
-
 logged_out_now = st.session_state.pop("logout_requested", False)
 if logged_out_now:
     _logout()

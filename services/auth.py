@@ -30,7 +30,6 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 CODE_TTL_SECONDS = 10 * 60
 SESSION_TTL_SECONDS = 7 * 24 * 60 * 60
 SESSION_COOKIE_NAME = "cm_session"
-_COOKIE_MANAGER_STATE_KEY = "_browser_cookie_manager"
 SESSION_STATE_REFRESH_SECONDS = 60 * 60
 SESSION_CLEANUP_INTERVAL_SECONDS = 15 * 60
 _VALIDATED_SESSION_TOKEN_KEY = "_validated_session_token"
@@ -151,11 +150,6 @@ def _current_session_token() -> str | None:
     token = st.session_state.get("session_token")
     if token:
         return str(token)
-    cookie_manager = st.session_state.get(_COOKIE_MANAGER_STATE_KEY)
-    if cookie_manager is not None:
-        component_cookie = cookie_manager.get(SESSION_COOKIE_NAME)
-        if component_cookie:
-            return str(component_cookie)
     try:
         cookie_value = st.context.cookies.get(SESSION_COOKIE_NAME)
     except Exception:
@@ -163,30 +157,8 @@ def _current_session_token() -> str | None:
     return str(cookie_value) if cookie_value else None
 
 
-def _browser_uses_https() -> bool:
-    try:
-        return str(st.context.url).lower().startswith("https://")
-    except Exception:
-        return False
-
-
 def write_session_cookie(token: str) -> None:
-    """Write the opaque browser token without triggering iframe navigation."""
-
-    cookie_manager = st.session_state.get(_COOKIE_MANAGER_STATE_KEY)
-    if cookie_manager is not None:
-        cookie_manager.set(
-            SESSION_COOKIE_NAME,
-            str(token),
-            key="campusmate_cookie_write",
-            path="/",
-            max_age=SESSION_TTL_SECONDS,
-            secure=_browser_uses_https(),
-            same_site="strict",
-        )
-        if isinstance(getattr(cookie_manager, "cookies", None), dict):
-            cookie_manager.cookies[SESSION_COOKIE_NAME] = str(token)
-        return
+    """Write the opaque browser token without a third-party component."""
 
     token_json = json.dumps(str(token))
     name_json = json.dumps(SESSION_COOKIE_NAME)
@@ -208,18 +180,7 @@ def write_session_cookie(token: str) -> None:
 
 
 def clear_session_cookie() -> None:
-    """Remove the browser token without triggering iframe navigation."""
-
-    cookie_manager = st.session_state.get(_COOKIE_MANAGER_STATE_KEY)
-    if cookie_manager is not None:
-        if cookie_manager.get(SESSION_COOKIE_NAME):
-            cookie_manager.delete(
-                SESSION_COOKIE_NAME,
-                key="campusmate_cookie_delete",
-            )
-        if isinstance(getattr(cookie_manager, "cookies", None), dict):
-            cookie_manager.cookies.pop(SESSION_COOKIE_NAME, None)
-        return
+    """Remove the browser token without a third-party component."""
 
     name_json = json.dumps(SESSION_COOKIE_NAME)
     st.html(
