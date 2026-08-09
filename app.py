@@ -138,7 +138,10 @@ def _logout() -> None:
             if isinstance(default_value, dict)
             else default_value
         )
-    clear_session_cookie()
+    # The server token is already revoked. Delete the browser cookie only
+    # after the login page has rendered so Cloud latency cannot leave the old
+    # authenticated page visible while the component is mounting.
+    st.session_state["session_cookie_delete_pending"] = True
 
 
 def _request_logout() -> None:
@@ -510,15 +513,14 @@ if is_authenticated and not requested_route:
     else:
         st.switch_page(restored_path)
 
+pending_cookie: str | None = None
 if is_authenticated:
     if requested_route in AUTHENTICATED_ROUTE_PATHS:
         st.session_state["last_authenticated_route"] = requested_route
         st.session_state["last_authenticated_query_params"] = dict(st.query_params)
-    pending_cookie = st.session_state.pop("session_cookie_pending", None)
-    if pending_cookie:
-        # Mount the writer once on the stable authenticated shell so the login
-        # page can switch immediately without losing the component update.
-        write_session_cookie(str(pending_cookie))
+    pending_cookie_value = st.session_state.pop("session_cookie_pending", None)
+    if pending_cookie_value:
+        pending_cookie = str(pending_cookie_value)
 
 if not is_authenticated:
     _inject_login_shell_css()
@@ -644,6 +646,13 @@ if is_authenticated:
             st.caption("部署操作会在对应平台中完成，不会修改本地问卷数据。")
 
 navigation.run()
+
+# Cookie components run after the destination page has drawn. This keeps the
+# visible transition immediate while preserving refresh-safe authentication.
+if pending_cookie:
+    write_session_cookie(pending_cookie)
+if st.session_state.pop("session_cookie_delete_pending", False):
+    clear_session_cookie()
 
 # Persist route and workflow state after the page has streamed its visible UI.
 # The database write no longer blocks the page transition or leaves stale UI
