@@ -62,7 +62,7 @@ email = str(auth_user["email"])
 st.caption("CAMPUSMATE · 周期搭子匹配")
 st.title("每周一次，认真认识一个新搭子")
 st.write(
-    "每周日16:30（北京时间）统一截止并运行真实用户全局匹配；结果生成后立即公布，同时开放下一轮报名。"
+    "每周日19:00（北京时间）统一截止并运行真实用户全局匹配；结果生成后立即公布，同时开放下一轮报名。"
 )
 
 try:
@@ -92,7 +92,7 @@ with st.container(border=True):
     title_col, count_col = st.columns([3, 1])
     with title_col:
         st.subheader(str(current_round["name"]))
-        st.write(f"报名截止：{cutoff:%Y年%m月%d日（周日）16:30}")
+        st.write(f"报名截止：{cutoff:%Y年%m月%d日（周日）19:00}")
         st.caption(f"距离截止还有 {_remaining_text(closes_at)}")
     with count_col:
         st.metric("已报名", f"{int(current_round.get('enrollment_count', 0))} 人")

@@ -153,8 +153,10 @@ ACTIVITY_IMAGE_DATA_URL_RE = re.compile(
 MAX_ACTIVITY_IMAGE_BYTES = 1_000_000
 BEIJING_TIMEZONE = ZoneInfo("Asia/Shanghai")
 CYCLE_CUTOFF_WEEKDAY = 6
-CYCLE_CUTOFF_HOUR = 16
-CYCLE_CUTOFF_MINUTE = 30
+CYCLE_CUTOFF_HOUR = 19
+CYCLE_CUTOFF_MINUTE = 0
+CYCLE_PREVIOUS_CUTOFF_HOUR = 16
+CYCLE_PREVIOUS_CUTOFF_MINUTE = 30
 CYCLE_MINIMUM_SCORE = 45.0
 
 
@@ -2067,7 +2069,7 @@ def enroll_in_match_round(
 
 
 def weekly_cycle_window(now_timestamp: int | None = None) -> tuple[int, int]:
-    """Return the active Beijing-time weekly window ending Sunday 16:30."""
+    """Return the active Beijing-time weekly window ending Sunday 19:00."""
 
     now_value = int(now_timestamp if now_timestamp is not None else _now())
     local_now = datetime.fromtimestamp(now_value, BEIJING_TIMEZONE)
@@ -2437,6 +2439,66 @@ def ensure_cycle_match_round(
             "SELECT * FROM match_rounds WHERE registration_closes_at = ?",
             (closes_at,),
         ).fetchone()
+        if existing is None:
+            # During the 16:30 -> 19:00 rollout, the old scheduler may already
+            # have opened next week's empty round. Reuse only that untouched
+            # legacy round so the remaining hours of the current Sunday can be
+            # used for testing without deleting enrollments or published data.
+            legacy = connection.execute(
+                """
+                SELECT r.*
+                FROM match_rounds AS r
+                WHERE r.status = 'open'
+                  AND r.registration_closes_at > ?
+                  AND r.registration_closes_at <= ?
+                  AND NOT EXISTS (
+                      SELECT 1 FROM match_enrollments AS e
+                      WHERE e.round_id = r.round_id
+                  )
+                ORDER BY r.registration_closes_at
+                LIMIT 1
+                """,
+                (closes_at, closes_at + 7 * 86400),
+            ).fetchone()
+            if legacy is not None:
+                legacy_cutoff = datetime.fromtimestamp(
+                    int(legacy["registration_closes_at"]), BEIJING_TIMEZONE
+                )
+                is_previous_schedule = (
+                    legacy_cutoff.weekday() == CYCLE_CUTOFF_WEEKDAY
+                    and legacy_cutoff.hour == CYCLE_PREVIOUS_CUTOFF_HOUR
+                    and legacy_cutoff.minute == CYCLE_PREVIOUS_CUTOFF_MINUTE
+                )
+                if is_previous_schedule:
+                    connection.execute(
+                        """
+                        UPDATE match_rounds
+                        SET name = ?, registration_opens_at = ?,
+                            registration_closes_at = ?, results_at = ?,
+                            updated_at = ?
+                        WHERE round_id = ?
+                        """,
+                        (
+                            _round_name(closes_at),
+                            opens_at,
+                            closes_at,
+                            closes_at,
+                            now,
+                            str(legacy["round_id"]),
+                        ),
+                    )
+                    existing = connection.execute(
+                        "SELECT * FROM match_rounds WHERE round_id = ?",
+                        (str(legacy["round_id"]),),
+                    ).fetchone()
+                    _audit(
+                        connection,
+                        actor_email=actor_email,
+                        action="match_round.reschedule_cutoff",
+                        entity_type="match_round",
+                        entity_id=str(legacy["round_id"]),
+                        details={"from": int(legacy["registration_closes_at"]), "to": closes_at},
+                    )
         if existing is None:
             creator = _round_creator(connection, actor_email)
             round_id = _new_id("round")

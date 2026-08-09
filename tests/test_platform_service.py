@@ -946,11 +946,43 @@ class PlatformServiceTests(unittest.TestCase):
         self.assertEqual(1, snapshot_count)
 
 
-    def test_weekly_round_closes_sunday_at_1630_beijing(self) -> None:
+    def test_weekly_round_closes_sunday_at_1900_beijing(self) -> None:
         saturday = int(datetime(2026, 8, 8, 12, tzinfo=ZoneInfo("Asia/Shanghai")).timestamp())
         _opens_at, closes_at = weekly_cycle_window(saturday)
         cutoff = datetime.fromtimestamp(closes_at, ZoneInfo("Asia/Shanghai"))
-        self.assertEqual((6, 16, 30), (cutoff.weekday(), cutoff.hour, cutoff.minute))
+        self.assertEqual((6, 19, 0), (cutoff.weekday(), cutoff.hour, cutoff.minute))
+
+    def test_empty_next_week_legacy_round_is_reused_for_current_sunday(self) -> None:
+        beijing = ZoneInfo("Asia/Shanghai")
+        now = int(datetime(2026, 8, 9, 17, tzinfo=beijing).timestamp())
+        legacy_closes_at = int(datetime(2026, 8, 16, 16, 30, tzinfo=beijing).timestamp())
+        legacy_round_id = create_match_round(
+            "owner@example.com",
+            name="旧截止时间轮次",
+            registration_opens_at=now - 60,
+            registration_closes_at=legacy_closes_at,
+            results_at=legacy_closes_at,
+            status="open",
+            sqlite_path=self.database,
+        )
+
+        cycle = ensure_cycle_match_round(
+            "owner@example.com",
+            now_timestamp=now,
+            sqlite_path=self.database,
+        )
+
+        self.assertEqual(legacy_round_id, cycle["current_round"]["round_id"])
+        cutoff = datetime.fromtimestamp(
+            int(cycle["current_round"]["registration_closes_at"]), beijing
+        )
+        self.assertEqual((2026, 8, 9, 19, 0), (
+            cutoff.year,
+            cutoff.month,
+            cutoff.day,
+            cutoff.hour,
+            cutoff.minute,
+        ))
 
     def test_cycle_round_finalizes_real_enrollments_and_opens_next(self) -> None:
         for email, user_id in USERS[:2]:
