@@ -4,4 +4,4 @@
 # The upper bound prevents an unreviewed major-version upgrade.
 streamlit>=1.61,<2.0
 networkx>=3,<4
-psycopg[binary]>=3.2,<4
+psycopg[binary,pool]>=3.2,<4

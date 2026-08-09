@@ -123,6 +123,38 @@ class AuthTests(unittest.TestCase):
         self.assertNotIn("auth_user", session_state)
         self.assertNotIn("session_token", session_state)
 
+    def test_validated_session_skips_repeated_database_restore(self) -> None:
+        token = "already-validated-token"
+        session_state: dict[str, object] = {
+            "auth_user": {"email": "person@example.com", "user_id": "U0051"},
+            "session_token": token,
+            auth._VALIDATED_SESSION_TOKEN_KEY: token,
+        }
+        with (
+            patch("services.auth.st.session_state", session_state),
+            patch("services.auth.load_login_session") as load_login_session,
+        ):
+            restored = auth.restore_persistent_session()
+
+        self.assertTrue(restored)
+        load_login_session.assert_not_called()
+
+    def test_unchanged_session_state_is_not_written_on_every_rerun(self) -> None:
+        token = "stable-session-token"
+        session_state: dict[str, object] = {
+            "auth_user": {"email": "person@example.com", "user_id": "U0051"},
+            "session_token": token,
+            "selected_match_type": "study",
+        }
+        with (
+            patch("services.auth.st.session_state", session_state),
+            patch("services.auth.save_login_session_state") as save_session,
+        ):
+            auth._mark_session_persisted(token, session_state)
+            auth.persist_current_session_state()
+
+        save_session.assert_not_called()
+
     def test_cookie_writer_uses_secure_browser_attributes(self) -> None:
         with patch("services.auth.st.html") as html:
             auth.write_session_cookie("opaque-token", redirect_to="/")

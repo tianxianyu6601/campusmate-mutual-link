@@ -279,16 +279,16 @@ st.markdown(
       [data-testid="stMain"] h2,
       [data-testid="stMain"] h3,
       [data-testid="stMain"] h4,
-      [data-testid="stMain"] p,
       [data-testid="stMain"] label,
-      [data-testid="stMain"] li,
-      [data-testid="stMain"] span:not([data-testid="stIconMaterial"]) {
+      [data-testid="stMain"] li {
         color: #111111 !important;
       }
       [data-testid="stMain"] div[data-testid="stCaptionContainer"] p {
         color: #333333 !important;
       }
-      [data-testid="stMultiSelect"] [data-baseweb="tag"] {
+      [data-testid="stMultiSelect"] [data-baseweb="tag"],
+      [data-baseweb="select"] [data-baseweb="tag"],
+      [data-testid="stMultiSelectTagsContainer"] [data-tag] {
         background: #eef4ff !important;
         border: 1.5px solid #2f6fed !important;
         border-radius: 0.5rem !important;
@@ -298,16 +298,24 @@ st.markdown(
         padding-left: 0.35rem !important;
       }
       [data-testid="stMultiSelect"] [data-baseweb="tag"] span,
-      [data-testid="stMultiSelect"] [data-baseweb="tag"] div {
+      [data-testid="stMultiSelect"] [data-baseweb="tag"] div,
+      [data-baseweb="select"] [data-baseweb="tag"] span,
+      [data-baseweb="select"] [data-baseweb="tag"] div,
+      [data-testid="stMultiSelectTagsContainer"] [data-tag] span {
         color: #17324d !important;
         font-weight: 600 !important;
         opacity: 1 !important;
       }
-      [data-testid="stMultiSelect"] [data-baseweb="tag"] svg {
+      [data-testid="stMultiSelect"] [data-baseweb="tag"] svg,
+      [data-baseweb="select"] [data-baseweb="tag"] svg,
+      [data-testid="stMultiSelectTagsContainer"] [data-tag] button,
+      [data-testid="stMultiSelectTagsContainer"] [data-tag] svg {
         color: #49627d !important;
         fill: #49627d !important;
       }
-      [data-testid="stMultiSelect"] [data-baseweb="tag"]:hover {
+      [data-testid="stMultiSelect"] [data-baseweb="tag"]:hover,
+      [data-baseweb="select"] [data-baseweb="tag"]:hover,
+      [data-testid="stMultiSelectTagsContainer"] [data-tag]:hover {
         background: #dde9ff !important;
         border-color: #174ea6 !important;
       }
@@ -336,6 +344,40 @@ st.markdown(
         margin: 0 !important;
         color: #111111 !important;
         text-align: center !important;
+      }
+      [data-testid="stMain"] div[data-testid="stButton"] > button[kind="primary"],
+      [data-testid="stMain"] div[data-testid="stFormSubmitButton"] > button[kind="primary"] {
+        background: #2f6fed !important;
+        border-color: #2f6fed !important;
+        color: #ffffff !important;
+      }
+      [data-testid="stMain"] div[data-testid="stButton"] > button[kind="primary"]:hover,
+      [data-testid="stMain"] div[data-testid="stFormSubmitButton"] > button[kind="primary"]:hover {
+        background: #2459c7 !important;
+        border-color: #2459c7 !important;
+      }
+      [data-testid="stMain"] div[data-testid="stButton"] > button[kind="primary"] p,
+      [data-testid="stMain"] div[data-testid="stButton"] > button[kind="primary"] span,
+      [data-testid="stMain"] div[data-testid="stFormSubmitButton"] > button[kind="primary"] p,
+      [data-testid="stMain"] div[data-testid="stFormSubmitButton"] > button[kind="primary"] span {
+        color: #ffffff !important;
+      }
+      div[class*="st-key-profile_save_action"] {
+        max-width: 100%;
+        width: 18rem;
+      }
+      div[class*="st-key-profile_save_action"] div[data-testid="stFormSubmitButton"] {
+        width: 100%;
+      }
+      div[class*="st-key-profile_save_action"] div[data-testid="stFormSubmitButton"] > button {
+        min-height: 3.15rem !important;
+        width: 100% !important;
+        white-space: nowrap !important;
+      }
+      div[class*="st-key-profile_save_action"] div[data-testid="stFormSubmitButton"] > button p,
+      div[class*="st-key-profile_save_action"] div[data-testid="stFormSubmitButton"] > button span {
+        width: auto !important;
+        white-space: nowrap !important;
       }
       div[data-testid="stMetric"] {
         background: #ffffff;

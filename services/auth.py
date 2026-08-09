@@ -9,6 +9,7 @@ import re
 import secrets
 import smtplib
 import ssl
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -20,7 +21,7 @@ from typing import Any, Mapping
 import streamlit as st
 
 from services.database import DatabaseConnection, transaction
-from services.migrations import run_migrations
+from services.migrations import ensure_migrations
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -29,6 +30,13 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 CODE_TTL_SECONDS = 10 * 60
 SESSION_TTL_SECONDS = 7 * 24 * 60 * 60
 SESSION_COOKIE_NAME = "cm_session"
+SESSION_STATE_REFRESH_SECONDS = 60 * 60
+SESSION_CLEANUP_INTERVAL_SECONDS = 15 * 60
+_VALIDATED_SESSION_TOKEN_KEY = "_validated_session_token"
+_PERSISTED_SESSION_DIGEST_KEY = "_persisted_session_digest"
+_PERSISTED_SESSION_AT_KEY = "_persisted_session_at"
+_SESSION_CLEANUP_LOCK = threading.Lock()
+_LAST_SESSION_CLEANUP: dict[str, float] = {}
 PERSISTED_SESSION_KEYS = (
     "selected_match_type",
     "questionnaire_answers",
@@ -61,11 +69,19 @@ def _db() -> DatabaseConnection:
 
 
 def init_db() -> None:
-    run_migrations(DB_PATH)
-    with _db() as connection:
-        connection.execute(
-            "DELETE FROM login_sessions WHERE expires_at < ?", (int(time.time()),)
-        )
+    ensure_migrations(DB_PATH)
+    cleanup_key = str(Path(DB_PATH).resolve())
+    now = time.monotonic()
+    if now - _LAST_SESSION_CLEANUP.get(cleanup_key, 0.0) < SESSION_CLEANUP_INTERVAL_SECONDS:
+        return
+    with _SESSION_CLEANUP_LOCK:
+        if now - _LAST_SESSION_CLEANUP.get(cleanup_key, 0.0) < SESSION_CLEANUP_INTERVAL_SECONDS:
+            return
+        with _db() as connection:
+            connection.execute(
+                "DELETE FROM login_sessions WHERE expires_at < ?", (int(time.time()),)
+            )
+        _LAST_SESSION_CLEANUP[cleanup_key] = now
 
 
 def normalize_email(email: str) -> str:
@@ -110,6 +126,22 @@ def _serializable_session_payload(state: Mapping[str, Any]) -> dict[str, Any]:
             continue
         payload[key] = value
     return payload
+
+
+def _session_payload_digest(state: Mapping[str, Any]) -> str:
+    payload_json = json.dumps(
+        _serializable_session_payload(state),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
+
+
+def _mark_session_persisted(token: str, state: Mapping[str, Any]) -> None:
+    st.session_state[_VALIDATED_SESSION_TOKEN_KEY] = str(token)
+    st.session_state[_PERSISTED_SESSION_DIGEST_KEY] = _session_payload_digest(state)
+    st.session_state[_PERSISTED_SESSION_AT_KEY] = time.monotonic()
 
 
 def _current_session_token() -> str | None:
@@ -299,6 +331,7 @@ def delete_login_session(token: str) -> None:
 def start_persistent_session(user: Mapping[str, str]) -> str:
     token = create_login_session(user, dict(st.session_state))
     st.session_state["session_token"] = token
+    _mark_session_persisted(token, dict(st.session_state))
     return token
 
 
@@ -306,18 +339,26 @@ def restore_persistent_session() -> bool:
     token = _current_session_token()
     if not token:
         return bool(st.session_state.get("auth_user"))
+    if (
+        st.session_state.get("auth_user")
+        and st.session_state.get(_VALIDATED_SESSION_TOKEN_KEY) == token
+    ):
+        return True
 
     restored = load_login_session(token)
     if restored is None:
         st.session_state.pop("session_token", None)
         st.session_state.pop("auth_user", None)
+        st.session_state.pop(_VALIDATED_SESSION_TOKEN_KEY, None)
+        st.session_state.pop(_PERSISTED_SESSION_DIGEST_KEY, None)
+        st.session_state.pop(_PERSISTED_SESSION_AT_KEY, None)
         return False
 
     st.session_state["session_token"] = token
-    if not st.session_state.get("auth_user"):
-        st.session_state["auth_user"] = restored["auth_user"]
-        for key, value in restored["state"].items():
-            st.session_state[key] = value
+    st.session_state["auth_user"] = restored["auth_user"]
+    for key, value in restored["state"].items():
+        st.session_state[key] = value
+    _mark_session_persisted(token, restored["state"])
     return True
 
 
@@ -329,7 +370,17 @@ def persist_current_session_state() -> None:
     if not token:
         token = start_persistent_session(dict(user))
     st.session_state["session_token"] = token
-    save_login_session_state(token, dict(st.session_state))
+    current_state = dict(st.session_state)
+    current_digest = _session_payload_digest(current_state)
+    last_digest = st.session_state.get(_PERSISTED_SESSION_DIGEST_KEY)
+    last_saved_at = float(st.session_state.get(_PERSISTED_SESSION_AT_KEY, 0.0))
+    if (
+        current_digest == last_digest
+        and time.monotonic() - last_saved_at < SESSION_STATE_REFRESH_SECONDS
+    ):
+        return
+    save_login_session_state(token, current_state)
+    _mark_session_persisted(token, current_state)
 
 
 def clear_persistent_session() -> None:
@@ -337,6 +388,9 @@ def clear_persistent_session() -> None:
     if token:
         delete_login_session(token)
     st.session_state.pop("session_token", None)
+    st.session_state.pop(_VALIDATED_SESSION_TOKEN_KEY, None)
+    st.session_state.pop(_PERSISTED_SESSION_DIGEST_KEY, None)
+    st.session_state.pop(_PERSISTED_SESSION_AT_KEY, None)
 
 
 def _next_user_id(connection: DatabaseConnection) -> str:

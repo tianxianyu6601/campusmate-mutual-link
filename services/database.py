@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import threading
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator, Sequence
@@ -15,6 +16,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SQLITE_PATH = PROJECT_ROOT / "campusmate_app.db"
 DATABASE_URL_ENV = "CAMPUSMATE_DATABASE_URL"
 FORCE_SQLITE_ENV = "CAMPUSMATE_FORCE_SQLITE"
+_POSTGRES_POOLS: dict[str, Any] = {}
+_POSTGRES_POOLS_LOCK = threading.Lock()
 
 
 def configured_database_url() -> str | None:
@@ -85,13 +88,29 @@ def connect(sqlite_path: Path | None = None) -> DatabaseConnection:
         if not database_url.startswith(("postgresql://", "postgres://")):
             raise RuntimeError("database_url 必须是 PostgreSQL 连接串")
         try:
-            import psycopg
             from psycopg.rows import dict_row
+            from psycopg_pool import ConnectionPool
         except ImportError as error:
             raise RuntimeError(
-                "已配置 database_url，但尚未安装 psycopg[binary]"
+                "已配置 database_url，但尚未安装 psycopg[binary,pool]"
             ) from error
-        raw_connection = psycopg.connect(database_url, row_factory=dict_row)
+
+        with _POSTGRES_POOLS_LOCK:
+            pool = _POSTGRES_POOLS.get(database_url)
+            if pool is None:
+                pool = ConnectionPool(
+                    conninfo=database_url,
+                    min_size=1,
+                    max_size=4,
+                    timeout=15,
+                    max_idle=300,
+                    max_lifetime=1800,
+                    kwargs={"row_factory": dict_row},
+                    close_returns=True,
+                    open=True,
+                )
+                _POSTGRES_POOLS[database_url] = pool
+        raw_connection = pool.getconn()
         return DatabaseConnection(raw_connection, "postgresql")
 
     path = Path(sqlite_path or DEFAULT_SQLITE_PATH)

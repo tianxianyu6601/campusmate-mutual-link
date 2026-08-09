@@ -432,9 +432,13 @@ with st.form("profile_editor"):
                     key=f"profile_privacy_{field_name}",
                 )
 
-    submitted = st.form_submit_button(
-        "保存个人资料", type="primary", icon=":material/save:"
-    )
+    with st.container(key="profile_save_action"):
+        submitted = st.form_submit_button(
+            "保存个人资料",
+            type="primary",
+            icon=":material/save:",
+            width="content",
+        )
 
 if submitted:
     avatar_data_url = str(profile.get("avatar_data_url", ""))

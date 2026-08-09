@@ -24,7 +24,7 @@ from services.database import (
     is_integrity_error,
     transaction,
 )
-from services.migrations import run_migrations
+from services.migrations import ensure_migrations
 
 
 DB_PATH = DEFAULT_SQLITE_PATH
@@ -382,7 +382,7 @@ def calculate_profile_completion(
 
 def _prepare_database(path: Path | None = None) -> Path:
     selected_path = Path(path or DB_PATH)
-    run_migrations(selected_path)
+    ensure_migrations(selected_path)
     return selected_path
 
 

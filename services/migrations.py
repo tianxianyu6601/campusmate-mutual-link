@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+import hashlib
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from services.database import DatabaseConnection, transaction
+from services.database import (
+    DEFAULT_SQLITE_PATH,
+    DatabaseConnection,
+    configured_database_url,
+    transaction,
+)
 
 
 @dataclass(frozen=True)
@@ -323,6 +330,17 @@ MIGRATIONS = (
     ACTIVITY_WORKFLOW_SCHEMA,
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version
+_MIGRATION_CACHE: set[tuple[str, str]] = set()
+_MIGRATION_LOCK = threading.RLock()
+
+
+def _migration_identity(sqlite_path: Path | None) -> tuple[str, str]:
+    database_url = configured_database_url()
+    if database_url:
+        digest = hashlib.sha256(database_url.encode("utf-8")).hexdigest()
+        return ("postgresql", digest)
+    path = Path(sqlite_path or DEFAULT_SQLITE_PATH).resolve()
+    return ("sqlite", str(path))
 
 
 def _ensure_migration_table(connection: DatabaseConnection) -> None:
@@ -359,7 +377,20 @@ def run_migrations(sqlite_path: Path | None = None) -> list[int]:
 
         if connection.backend == "sqlite":
             connection.execute(f"PRAGMA user_version = {LATEST_SCHEMA_VERSION}")
+    with _MIGRATION_LOCK:
+        _MIGRATION_CACHE.add(_migration_identity(sqlite_path))
     return applied_now
+
+
+def ensure_migrations(sqlite_path: Path | None = None) -> None:
+    """Run the idempotent migration check once per database and process."""
+
+    identity = _migration_identity(sqlite_path)
+    if identity in _MIGRATION_CACHE:
+        return
+    with _MIGRATION_LOCK:
+        if identity not in _MIGRATION_CACHE:
+            run_migrations(sqlite_path)
 
 
 def current_schema_version(sqlite_path: Path | None = None) -> int:
