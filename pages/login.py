@@ -135,6 +135,7 @@ with st.container(key="login_shell"):
                 except AuthError as error:
                     st.error(str(error))
                 else:
+                    st.session_state["session_cookie_pending"] = token
                     write_session_cookie(token)
                     # Let the browser apply the cookie delta before this page is replaced.
                     time.sleep(0.15)

@@ -271,3 +271,4 @@
 - 自定义地点是独立文本框，填写后优先于常用地点；编辑历史自定义地点时会自动回填。
 - Streamlit Cloud 还有一层应用 iframe：只在登录成功瞬间渲染 Cookie 写入组件会随页面切换被移除，线上刷新仍可能丢失登录。已登录外壳必须稳定挂载同一写入器；写入器不负责导航，因此不会再制造嵌套页面或二次点击。
 - 原生 `st.html` 的 JavaScript 写入在 Streamlit Cloud 外层 iframe 中仍无法被刷新后的 Python 会话读回；改用 Streamlit 官方组件目录收录的 Extra Components 0.1.81 `CookieManager`，通过双向组件状态读写 Cookie，并保留原生脚本作为无组件测试环境的后备路径。
+- CookieManager 的写操作本身也是一个 Streamlit 组件；若在每个已登录页面重复调用，会给普通导航增加一次不必要的组件刷新。最终方案只在登录成功时写入，并在首次稳定的已登录外壳补写一次，之后页面只读取 Cookie。

@@ -455,11 +455,11 @@ restore_persistent_session()
 
 is_authenticated = bool(st.session_state.get("auth_user"))
 if is_authenticated:
-    session_token = st.session_state.get("session_token")
-    if session_token:
-        # Keep the cookie writer mounted on a stable authenticated page. This is
-        # required on Streamlit Cloud, where the app itself runs inside an iframe.
-        write_session_cookie(str(session_token))
+    pending_cookie = st.session_state.pop("session_cookie_pending", None)
+    if pending_cookie:
+        # Mount the writer once on the stable authenticated shell so the login
+        # page can switch immediately without losing the component update.
+        write_session_cookie(str(pending_cookie))
     persist_current_session_state()
 
 available_pages = _available_pages(is_authenticated)
