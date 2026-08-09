@@ -201,8 +201,8 @@ def read_session_cookie() -> tuple[bool, str | None]:
         data={"action": "read", "name": SESSION_COOKIE_NAME},
         default={"result": {"ready": False, "token": None}},
         key="campusmate_session_cookie_reader",
-        width=0,
-        height=0,
+        width="content",
+        height="content",
         on_result_change=lambda: None,
     )
     result = component_result.result or {}
@@ -221,8 +221,8 @@ def write_session_cookie(token: str) -> None:
             "maxAge": SESSION_TTL_SECONDS,
         },
         key="campusmate_session_cookie_writer",
-        width=0,
-        height=0,
+        width="content",
+        height="content",
     )
 
 
@@ -231,8 +231,8 @@ def clear_session_cookie() -> None:
     _SESSION_COOKIE_COMPONENT(
         data={"action": "delete", "name": SESSION_COOKIE_NAME},
         key="campusmate_session_cookie_delete",
-        width=0,
-        height=0,
+        width="content",
+        height="content",
     )
 
 

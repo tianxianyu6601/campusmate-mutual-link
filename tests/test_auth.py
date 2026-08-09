@@ -174,8 +174,8 @@ class AuthTests(unittest.TestCase):
                 "maxAge": auth.SESSION_TTL_SECONDS,
             },
             key="campusmate_session_cookie_writer",
-            width=0,
-            height=0,
+            width="content",
+            height="content",
         )
 
     def test_session_cookie_reader_returns_component_token(self) -> None:
