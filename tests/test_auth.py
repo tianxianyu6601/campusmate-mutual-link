@@ -7,7 +7,7 @@ import unittest
 import smtplib
 import json
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from services import auth
 
@@ -166,6 +166,34 @@ class AuthTests(unittest.TestCase):
         self.assertNotIn("window.location.replace", html_markup)
         self.assertNotIn("window.parent.location", html_markup)
         self.assertTrue(html.call_args.kwargs["unsafe_allow_javascript"])
+
+    def test_component_cookie_manager_is_used_when_available(self) -> None:
+        manager = Mock()
+        manager.get.return_value = "component-token"
+        session_state = {"_browser_cookie_manager": manager}
+        with (
+            patch("services.auth.st.session_state", session_state),
+            patch("services.auth.st.html") as html,
+            patch("services.auth._browser_uses_https", return_value=True),
+        ):
+            self.assertEqual("component-token", auth._current_session_token())
+            auth.write_session_cookie("new-token")
+            auth.clear_session_cookie()
+
+        manager.set.assert_called_once_with(
+            auth.SESSION_COOKIE_NAME,
+            "new-token",
+            key="campusmate_cookie_write",
+            path="/",
+            max_age=auth.SESSION_TTL_SECONDS,
+            secure=True,
+            same_site="strict",
+        )
+        manager.delete.assert_called_once_with(
+            auth.SESSION_COOKIE_NAME,
+            key="campusmate_cookie_delete",
+        )
+        html.assert_not_called()
 
     def test_require_login_redirects_when_session_is_missing(self) -> None:
         class FakeContext:

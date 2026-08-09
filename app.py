@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+import extra_streamlit_components as stx
 import streamlit as st
 
 from services.auth import (
@@ -445,6 +446,9 @@ st.markdown(
 )
 
 _initialise_session_state()
+st.session_state["_browser_cookie_manager"] = stx.CookieManager(
+    key="campusmate_cookie_reader"
+)
 if st.session_state.pop("logout_requested", False):
     _logout()
 restore_persistent_session()
