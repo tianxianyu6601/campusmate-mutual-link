@@ -24,6 +24,7 @@ from services.auth import (
     reset_password,
     restore_persistent_session,
     send_password_reset_code,
+    write_session_cookie,
 )
 from services.i18n import CHINESE
 
@@ -450,6 +451,11 @@ restore_persistent_session()
 
 is_authenticated = bool(st.session_state.get("auth_user"))
 if is_authenticated:
+    session_token = st.session_state.get("session_token")
+    if session_token:
+        # Keep the cookie writer mounted on a stable authenticated page. This is
+        # required on Streamlit Cloud, where the app itself runs inside an iframe.
+        write_session_cookie(str(session_token))
     persist_current_session_state()
 
 available_pages = _available_pages(is_authenticated)
