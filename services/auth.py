@@ -170,7 +170,12 @@ def write_session_cookie(token: str) -> None:
             const campusMateCookieName = {name_json};
             const campusMateToken = {token_json};
             const campusMateSecure = window.location.protocol === "https:" ? "; Secure" : "";
-            document.cookie = `${{campusMateCookieName}}=${{encodeURIComponent(campusMateToken)}}; Max-Age={SESSION_TTL_SECONDS}; Path=/; SameSite=Strict${{campusMateSecure}}`;
+            const campusMateCookie = `${{campusMateCookieName}}=${{encodeURIComponent(campusMateToken)}}; Max-Age={SESSION_TTL_SECONDS}; Path=/; SameSite=Strict${{campusMateSecure}}`;
+            try {{
+              window.parent.document.cookie = campusMateCookie;
+            }} catch (error) {{
+              document.cookie = campusMateCookie;
+            }}
           }})();
         </script>
         """,
@@ -190,7 +195,12 @@ def clear_session_cookie() -> None:
           (() => {{
             const campusMateCookieName = {name_json};
             const campusMateSecure = window.location.protocol === "https:" ? "; Secure" : "";
-            document.cookie = `${{campusMateCookieName}}=; Max-Age=0; Path=/; SameSite=Strict${{campusMateSecure}}`;
+            const campusMateCookie = `${{campusMateCookieName}}=; Max-Age=0; Path=/; SameSite=Strict${{campusMateSecure}}`;
+            try {{
+              window.parent.document.cookie = campusMateCookie;
+            }} catch (error) {{
+              document.cookie = campusMateCookie;
+            }}
           }})();
         </script>
         """,

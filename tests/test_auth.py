@@ -172,6 +172,7 @@ class AuthTests(unittest.TestCase):
         self.assertIn("Max-Age=604800", html_markup)
         self.assertNotIn("window.location.replace", html_markup)
         self.assertNotIn("window.parent.location", html_markup)
+        self.assertIn("window.parent.document.cookie", html_markup)
         self.assertTrue(html.call_args.kwargs["unsafe_allow_javascript"])
 
     def test_require_login_redirects_when_session_is_missing(self) -> None:
