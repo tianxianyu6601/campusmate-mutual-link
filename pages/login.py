@@ -131,6 +131,7 @@ with st.container(key="login_shell"):
                         st.session_state.auth_user = user
                         st.session_state["last_authenticated_route"] = "home"
                         st.session_state["last_authenticated_query_params"] = {}
+                        st.session_state["login_transition_pending"] = True
                         token = start_persistent_session(user)
                     except AuthError as error:
                         st.error(str(error))
@@ -139,10 +140,10 @@ with st.container(key="login_shell"):
                         # the component off this page avoids a duplicate iframe
                         # handshake and makes one submit sufficient.
                         st.session_state["session_cookie_pending"] = token
-                        # This run's navigation map contains only the public page.
-                        # A single automatic rerun rebuilds the authenticated map;
-                        # app.py then routes to /home without another user click.
-                        st.rerun()
+                        # Home is a hidden transition target in the public map.
+                        # One real page switch clears the login DOM while the
+                        # next run rebuilds the authenticated navigation shell.
+                        st.switch_page("pages/home.py")
 
             if st.button("忘记密码？点击重置"):
                 st.session_state.login_mode_next = "重置密码"

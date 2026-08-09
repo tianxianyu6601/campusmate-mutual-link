@@ -69,22 +69,31 @@ def _initialise_session_state() -> None:
 def _available_pages(is_authenticated: bool) -> list[st.Page]:
     """Build the public login route and authenticated CampusMate page map."""
 
-    login_page = st.Page(
-        "pages/login.py",
-        title="登录",
-        icon="🔐",
-        default=True,
-    )
     if not is_authenticated:
-        return [login_page]
+        return [
+            st.Page(
+                "pages/login.py",
+                title="登录",
+                icon="🔐",
+                default=True,
+            ),
+            # Registered only as a hidden post-login transition target. Direct
+            # unauthenticated access is still rejected by require_login().
+            st.Page(
+                "pages/home.py",
+                title="首页",
+                icon="🏠",
+                url_path="home",
+            ),
+        ]
 
     pages = [
-        login_page,
         st.Page(
             "pages/home.py",
             title="首页",
             icon="🏠",
             url_path="home",
+            default=True,
         ),
         st.Page("pages/profile.py", title="个人资料", icon="👤"),
         st.Page("pages/activities.py", title="组局广场", icon="🎉"),
@@ -502,16 +511,24 @@ navigation = st.navigation(available_pages, position="hidden")
 requested_route = str(navigation.url_path or "")
 
 if is_authenticated and not requested_route:
-    restored_route = str(st.session_state.get("last_authenticated_route") or "home")
-    restored_path = AUTHENTICATED_ROUTE_PATHS.get(
-        restored_route,
-        AUTHENTICATED_ROUTE_PATHS["home"],
-    )
-    restored_query_params = st.session_state.get("last_authenticated_query_params")
-    if restored_query_params:
-        st.switch_page(restored_path, query_params=dict(restored_query_params))
+    if st.session_state.pop("login_transition_pending", False):
+        # Home is already the authenticated default. Avoid a second automatic
+        # page switch immediately after a successful login.
+        st.session_state["last_authenticated_route"] = "home"
+        st.session_state["last_authenticated_query_params"] = {}
     else:
-        st.switch_page(restored_path)
+        restored_route = str(st.session_state.get("last_authenticated_route") or "home")
+        restored_path = AUTHENTICATED_ROUTE_PATHS.get(
+            restored_route,
+            AUTHENTICATED_ROUTE_PATHS["home"],
+        )
+        restored_query_params = st.session_state.get("last_authenticated_query_params")
+        if restored_query_params:
+            st.switch_page(restored_path, query_params=dict(restored_query_params))
+        else:
+            st.switch_page(restored_path)
+elif is_authenticated:
+    st.session_state.pop("login_transition_pending", None)
 
 pending_cookie: str | None = None
 if is_authenticated:
