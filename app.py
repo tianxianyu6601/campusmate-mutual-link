@@ -20,6 +20,7 @@ from services.auth import (
     clear_persistent_session,
     clear_session_cookie,
     persist_current_session_state,
+    read_session_cookie,
     reset_password,
     restore_persistent_session,
     send_password_reset_code,
@@ -468,6 +469,14 @@ st.markdown(
 )
 
 _initialise_session_state()
+if not st.session_state.get("_browser_session_cookie_checked"):
+    cookie_ready, browser_session_token = read_session_cookie()
+    if not cookie_ready:
+        st.stop()
+    st.session_state["_browser_session_cookie_checked"] = True
+    if browser_session_token:
+        st.session_state["session_token"] = browser_session_token
+
 logged_out_now = st.session_state.pop("logout_requested", False)
 if logged_out_now:
     _logout()

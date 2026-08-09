@@ -56,6 +56,43 @@ SMTP_CLOUD_FAILURE_ADVICE = (
 )
 
 
+_SESSION_COOKIE_COMPONENT = st.components.v2.component(
+    "campusmate_session_cookie",
+    js="""
+    export default function(component) {
+      const { data, setStateValue } = component;
+      const name = data.name;
+      const secure = window.location.protocol === "https:" ? "; Secure" : "";
+
+      if (data.action === "set") {
+        document.cookie = `${name}=${encodeURIComponent(data.token)}; Max-Age=${data.maxAge}; Path=/; SameSite=Strict${secure}`;
+        return;
+      }
+
+      if (data.action === "delete") {
+        document.cookie = `${name}=; Max-Age=0; Path=/; SameSite=Strict${secure}`;
+        return;
+      }
+
+      const prefix = `${name}=`;
+      const raw = document.cookie
+        .split(";")
+        .map((item) => item.trim())
+        .find((item) => item.startsWith(prefix));
+      let token = null;
+      if (raw) {
+        try {
+          token = decodeURIComponent(raw.slice(prefix.length));
+        } catch (error) {
+          token = null;
+        }
+      }
+      setStateValue("result", { ready: true, token });
+    }
+    """,
+)
+
+
 class AuthError(RuntimeError):
     """Raised for expected account-flow failures."""
 
@@ -157,55 +194,44 @@ def _current_session_token() -> str | None:
     return str(cookie_value) if cookie_value else None
 
 
+def read_session_cookie() -> tuple[bool, str | None]:
+    """Read the login cookie once through a first-party inline component."""
+
+    component_result = _SESSION_COOKIE_COMPONENT(
+        data={"action": "read", "name": SESSION_COOKIE_NAME},
+        default={"result": {"ready": False, "token": None}},
+        key="campusmate_session_cookie_reader",
+        width=0,
+        height=0,
+    )
+    result = component_result.result or {}
+    ready = bool(result.get("ready"))
+    token = result.get("token")
+    return ready, str(token) if token else None
+
+
 def write_session_cookie(token: str) -> None:
     """Write the opaque browser token without a third-party component."""
-
-    token_json = json.dumps(str(token))
-    name_json = json.dumps(SESSION_COOKIE_NAME)
-    st.html(
-        f"""
-        <span style="display:none" aria-hidden="true"></span>
-        <script>
-          (() => {{
-            const campusMateCookieName = {name_json};
-            const campusMateToken = {token_json};
-            const campusMateSecure = window.location.protocol === "https:" ? "; Secure" : "";
-            const campusMateCookie = `${{campusMateCookieName}}=${{encodeURIComponent(campusMateToken)}}; Max-Age={SESSION_TTL_SECONDS}; Path=/; SameSite=Strict${{campusMateSecure}}`;
-            try {{
-              window.parent.document.cookie = campusMateCookie;
-            }} catch (error) {{
-              document.cookie = campusMateCookie;
-            }}
-          }})();
-        </script>
-        """,
-        width="content",
-        unsafe_allow_javascript=True,
+    _SESSION_COOKIE_COMPONENT(
+        data={
+            "action": "set",
+            "name": SESSION_COOKIE_NAME,
+            "token": str(token),
+            "maxAge": SESSION_TTL_SECONDS,
+        },
+        key="campusmate_session_cookie_writer",
+        width=0,
+        height=0,
     )
 
 
 def clear_session_cookie() -> None:
     """Remove the browser token without a third-party component."""
-
-    name_json = json.dumps(SESSION_COOKIE_NAME)
-    st.html(
-        f"""
-        <span style="display:none" aria-hidden="true"></span>
-        <script>
-          (() => {{
-            const campusMateCookieName = {name_json};
-            const campusMateSecure = window.location.protocol === "https:" ? "; Secure" : "";
-            const campusMateCookie = `${{campusMateCookieName}}=; Max-Age=0; Path=/; SameSite=Strict${{campusMateSecure}}`;
-            try {{
-              window.parent.document.cookie = campusMateCookie;
-            }} catch (error) {{
-              document.cookie = campusMateCookie;
-            }}
-          }})();
-        </script>
-        """,
-        width="content",
-        unsafe_allow_javascript=True,
+    _SESSION_COOKIE_COMPONENT(
+        data={"action": "delete", "name": SESSION_COOKIE_NAME},
+        key="campusmate_session_cookie_delete",
+        width=0,
+        height=0,
     )
 
 

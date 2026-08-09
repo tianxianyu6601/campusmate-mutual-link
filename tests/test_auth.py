@@ -163,17 +163,26 @@ class AuthTests(unittest.TestCase):
         save_session.assert_not_called()
 
     def test_cookie_writer_uses_secure_browser_attributes(self) -> None:
-        with patch("services.auth.st.html") as html:
+        with patch("services.auth._SESSION_COOKIE_COMPONENT") as component:
             auth.write_session_cookie("opaque-token")
 
-        html_markup = html.call_args.args[0]
-        self.assertIn("SameSite=Strict", html_markup)
-        self.assertIn("; Secure", html_markup)
-        self.assertIn("Max-Age=604800", html_markup)
-        self.assertNotIn("window.location.replace", html_markup)
-        self.assertNotIn("window.parent.location", html_markup)
-        self.assertIn("window.parent.document.cookie", html_markup)
-        self.assertTrue(html.call_args.kwargs["unsafe_allow_javascript"])
+        component.assert_called_once_with(
+            data={
+                "action": "set",
+                "name": auth.SESSION_COOKIE_NAME,
+                "token": "opaque-token",
+                "maxAge": auth.SESSION_TTL_SECONDS,
+            },
+            key="campusmate_session_cookie_writer",
+            width=0,
+            height=0,
+        )
+
+    def test_session_cookie_reader_returns_component_token(self) -> None:
+        result = Mock()
+        result.result = {"ready": True, "token": "component-token"}
+        with patch("services.auth._SESSION_COOKIE_COMPONENT", return_value=result):
+            self.assertEqual((True, "component-token"), auth.read_session_cookie())
 
     def test_require_login_redirects_when_session_is_missing(self) -> None:
         class FakeContext:
