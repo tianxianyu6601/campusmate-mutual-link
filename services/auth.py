@@ -93,6 +93,40 @@ _SESSION_COOKIE_COMPONENT = st.components.v2.component(
 )
 
 
+_LOGOUT_FEEDBACK_COMPONENT = st.components.v2.component(
+    "campusmate_logout_feedback",
+    js="""
+    export default function() {
+      const handler = (event) => {
+        const button = event.target.closest("button");
+        if (!button || !button.innerText.includes("退出登录")) return;
+        if (document.getElementById("campusmate-logout-overlay")) return;
+
+        const overlay = document.createElement("div");
+        overlay.id = "campusmate-logout-overlay";
+        overlay.setAttribute("role", "status");
+        overlay.innerHTML = `
+          <div style="width:44px;height:44px;border:4px solid #dbeafe;border-top-color:#3b82f6;border-radius:50%;animation:campusmate-spin .7s linear infinite"></div>
+          <strong style="font-size:20px;color:#111827">正在安全退出…</strong>
+        `;
+        overlay.style.cssText = "position:fixed;inset:0;z-index:2147483647;background:rgba(248,250,252,.98);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px";
+        const style = document.createElement("style");
+        style.id = "campusmate-logout-style";
+        style.textContent = "@keyframes campusmate-spin{to{transform:rotate(360deg)}}";
+        document.head.appendChild(style);
+        document.body.appendChild(overlay);
+      };
+      document.addEventListener("click", handler, true);
+      return () => {
+        document.removeEventListener("click", handler, true);
+        document.getElementById("campusmate-logout-overlay")?.remove();
+        document.getElementById("campusmate-logout-style")?.remove();
+      };
+    }
+    """,
+)
+
+
 class AuthError(RuntimeError):
     """Raised for expected account-flow failures."""
 
@@ -209,6 +243,16 @@ def read_session_cookie() -> tuple[bool, str | None]:
     ready = bool(result.get("ready"))
     token = result.get("token")
     return ready, str(token) if token else None
+
+
+def mount_logout_feedback() -> None:
+    """Cover the authenticated page immediately while logout is processing."""
+
+    _LOGOUT_FEEDBACK_COMPONENT(
+        key="campusmate_logout_feedback",
+        width="content",
+        height="content",
+    )
 
 
 def write_session_cookie(token: str) -> None:

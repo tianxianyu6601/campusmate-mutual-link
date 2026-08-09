@@ -20,6 +20,7 @@ from services.auth import (
     clear_persistent_session,
     clear_session_cookie,
     delete_login_session,
+    mount_logout_feedback,
     persist_current_session_state,
     read_session_cookie,
     reset_password,
@@ -524,6 +525,7 @@ if not is_authenticated:
     _inject_login_shell_css()
 
 if is_authenticated:
+    mount_logout_feedback()
     with st.sidebar:
         st.markdown("## 🤝 CampusMate")
         user = st.session_state.auth_user

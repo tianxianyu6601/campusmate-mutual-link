@@ -200,6 +200,15 @@ class AuthTests(unittest.TestCase):
         self.assertNotIn("session_token", session_state)
         delete_session.assert_not_called()
 
+    def test_logout_feedback_mounts_first_party_component(self) -> None:
+        with patch("services.auth._LOGOUT_FEEDBACK_COMPONENT") as component:
+            auth.mount_logout_feedback()
+        component.assert_called_once_with(
+            key="campusmate_logout_feedback",
+            width="content",
+            height="content",
+        )
+
     def test_require_login_redirects_when_session_is_missing(self) -> None:
         class FakeContext:
             cookies: dict[str, str] = {}
