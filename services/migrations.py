@@ -343,6 +343,18 @@ ACTIVITY_CONTACT_SCHEMA = Migration(
 )
 
 
+CYCLE_MATCH_AUTOMATION_SCHEMA = Migration(
+    version=7,
+    name="cycle_match_automation_schema",
+    statements=(
+        "ALTER TABLE match_enrollments ADD COLUMN unmatched_reason TEXT NOT NULL DEFAULT ''",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_match_rounds_unique_cutoff ON match_rounds(registration_closes_at)",
+        "CREATE INDEX IF NOT EXISTS idx_match_rounds_status_cutoff ON match_rounds(status, registration_closes_at)",
+        "CREATE INDEX IF NOT EXISTS idx_match_enrollments_user ON match_enrollments(email, updated_at)",
+    ),
+)
+
+
 MIGRATIONS = (
     BASE_SCHEMA,
     UNIFIED_PLATFORM_SCHEMA,
@@ -350,6 +362,7 @@ MIGRATIONS = (
     ACTIVITY_WORKFLOW_SCHEMA,
     PROFILE_CONTACT_SCHEMA,
     ACTIVITY_CONTACT_SCHEMA,
+    CYCLE_MATCH_AUTOMATION_SCHEMA,
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version
 _MIGRATION_CACHE: set[tuple[str, str]] = set()

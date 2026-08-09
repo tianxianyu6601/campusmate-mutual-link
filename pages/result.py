@@ -1,34 +1,13 @@
-"""Display one selected CampusMate matching result."""
+"""Durable weekly match result for the authenticated user."""
 
 from __future__ import annotations
-
-from pathlib import Path
 
 import streamlit as st
 
 from ai.icebreaker import generate_icebreakers
 from data import vocabulary as vocab
-from data.data_loader import load_users
-from services.auth import (
-    email_for_user_id,
-    load_registered_profiles,
-    require_login,
-    send_match_notification,
-)
-
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DATASET = PROJECT_ROOT / "data" / "users.csv"
-
-
-def _label(mapping: dict[str, str], value: object) -> str:
-    return mapping.get(str(value), str(value))
-
-
-def _partner_id(match: dict[str, object], current_user_id: str) -> str:
-    user_a = str(match["user_a"])
-    user_b = str(match["user_b"])
-    return user_b if user_a == current_user_id else user_a
+from services.auth import require_login
+from services.platform_service import ServiceError, get_match_result_for_user
 
 
 def _labels(values: list[str], mapping: dict[str, str]) -> str:
@@ -37,87 +16,107 @@ def _labels(values: list[str], mapping: dict[str, str]) -> str:
     return "、".join(mapping.get(value, value) for value in values)
 
 
-st.markdown('<div class="campusmate-kicker">匹配结果</div>', unsafe_allow_html=True)
-st.title("你的推荐搭子")
-require_login()
+auth_user = require_login()
+email = str(auth_user["email"])
+round_id = str(st.query_params.get("round") or "").strip() or None
 
-current_profile = st.session_state.get("current_profile")
-match = st.session_state.get("current_match")
-if not current_profile:
-    st.warning("请先填写行动卡。")
-    if st.button("去填写行动卡", type="primary"):
-        st.switch_page("pages/questionnaire.py")
-    st.stop()
-if not match:
-    st.warning("还没有选中的匹配结果。")
-    if st.button("去运行匹配", type="primary"):
-        st.switch_page("pages/matching.py")
+st.caption("CAMPUSMATE · 周期匹配结果")
+st.title("你的本轮搭子")
+
+try:
+    result = get_match_result_for_user(email, round_id=round_id)
+except ServiceError as error:
+    st.error(str(error))
     st.stop()
 
-current_id = str(current_profile["user_id"])
-partner_id = _partner_id(match, current_id)
-users = [*load_users(DATASET), *load_registered_profiles()]
-partner = next((user for user in users if user["user_id"] == partner_id), None)
+if not result:
+    st.info("还没有已经公布的周期匹配结果。")
+    st.page_link(
+        "pages/cycle_match.py",
+        label="返回本轮报名",
+        icon=":material/calendar_month:",
+    )
+    st.stop()
+
+st.caption(str(result["name"]))
+if str(result.get("enrollment_status")) != "matched" or not result.get("result_id"):
+    reason = str(result.get("unmatched_reason") or "本轮暂未形成合适配对")
+    st.warning(reason)
+    st.write("系统不会为了凑数而忽略时间、地点或其他不可妥协条件。下一轮已经开放，可以沿用资料继续报名。")
+    st.page_link(
+        "pages/cycle_match.py",
+        label="参加下一轮",
+        icon=":material/refresh:",
+        width="stretch",
+    )
+    st.stop()
+
+explanation = dict(result.get("explanation") or {})
+partner_card = dict(result.get("partner_action_card") or {})
+own_card = dict(result.get("own_action_card") or {})
 
 score_col, partner_col = st.columns([1, 2])
 with score_col:
-    st.metric("综合匹配度", f"{float(match['score']):.1f}/100")
+    st.metric("综合匹配度", f"{float(result['score']):.1f}/100")
 with partner_col:
-    st.subheader(f"候选人 {partner_id}")
-    if partner:
-        match_type = str(partner["match_type"])
-        st.write(
-            f"{_label(vocab.MATCH_TYPES, match_type)} · "
-            f"{_label(vocab.ACTIVITIES[match_type], partner['activity'])}"
-        )
-        st.caption(partner["self_description"])
+    st.subheader(str(result.get("partner_name") or "你的搭子"))
+    match_type = str(partner_card.get("match_type", ""))
+    activity = str(partner_card.get("activity", ""))
+    match_type_label = vocab.MATCH_TYPES.get(match_type, match_type)
+    activity_label = vocab.ACTIVITIES.get(match_type, {}).get(activity, activity)
+    if match_type_label or activity_label:
+        st.write(" · ".join(value for value in (match_type_label, activity_label) if value))
+    if partner_card.get("self_description"):
+        st.caption(str(partner_card["self_description"]))
+
+with st.container(border=True):
+    st.subheader("联系你的搭子")
+    partner_contact = str(result.get("partner_contact") or "").strip()
+    if partner_contact:
+        st.success(partner_contact)
     else:
-        st.write("候选人来自当前匹配结果。")
+        st.warning("对方本轮联系方式暂不可用，请通过站内消息联系。")
+    st.caption("该联系方式只对本轮成功匹配的双方展示，请勿转发或公开。")
 
 left, right = st.columns(2)
 with left:
     with st.container(border=True):
         st.subheader("共同安排")
-        st.write(f"共同时间：{_labels(list(match.get('common_times', [])), vocab.TIME_SLOTS)}")
         st.write(
-            f"共同地点：{_labels(list(match.get('common_locations', [])), vocab.LOCATIONS)}"
+            "**共同时间：** "
+            + _labels(list(explanation.get("common_times", [])), vocab.TIME_SLOTS)
+        )
+        st.write(
+            "**共同地点：** "
+            + _labels(list(explanation.get("common_locations", [])), vocab.LOCATIONS)
         )
 with right:
     with st.container(border=True):
         st.subheader("推荐理由")
-        for reason in match["reasons"]:
-            st.write(f"- {reason}")
+        reasons = list(explanation.get("reasons", []))
+        if reasons:
+            for reason in reasons:
+                st.write(f"- {reason}")
+        else:
+            st.write("双方通过了不可妥协条件，并在核心偏好上较为接近。")
 
-st.subheader("各维度得分")
-for dimension, score in match["dimension_scores"].items():
-    label = vocab.PREFERENCE_DIMENSIONS.get(str(dimension), str(dimension))
-    numeric = float(score)
-    st.progress(numeric / 100, text=f"{label}：{numeric:.1f}/100")
+dimension_scores = dict(explanation.get("dimension_scores", {}))
+if dimension_scores:
+    st.subheader("各维度得分")
+    for dimension, score in dimension_scores.items():
+        label = vocab.PREFERENCE_DIMENSIONS.get(str(dimension), str(dimension))
+        numeric = float(score)
+        st.progress(numeric / 100, text=f"{label}：{numeric:.1f}/100")
 
-if partner:
+if own_card and partner_card:
     st.subheader("第一次沟通可以这样开始")
-    for index, prompt in enumerate(generate_icebreakers(current_profile, partner), start=1):
+    for index, prompt in enumerate(
+        generate_icebreakers(own_card, partner_card), start=1
+    ):
         st.info(f"{index}. {prompt}")
 
-st.subheader("匹配通知")
-partner_email = email_for_user_id(partner_id)
-if partner_email:
-    st.caption("这位候选人是注册用户，可以向对方邮箱发送匹配成功通知。")
-    if st.button("向对方发送匹配通知", type="primary"):
-        status = send_match_notification(
-            partner_email,
-            partner_id=current_id,
-            score=float(match["score"]),
-        )
-        if status == "sent":
-            st.success("通知邮件已发送。")
-        else:
-            st.warning("邮件服务尚未配置，已记录这次通知请求。")
-else:
-    st.info("这位候选人来自模拟数据集，没有真实邮箱；注册用户之间匹配时才会显示邮件通知按钮。")
-
-with st.container():
-    if st.button("返回匹配列表"):
-        st.switch_page("pages/matching.py")
-    if st.button("重新填写行动卡"):
-        st.switch_page("pages/questionnaire.py")
+st.page_link(
+    "pages/cycle_match.py",
+    label="返回周期匹配",
+    icon=":material/arrow_back:",
+)

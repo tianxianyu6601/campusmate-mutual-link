@@ -24,6 +24,9 @@ def _render_email(template_key: str, payload: Mapping[str, Any]) -> tuple[str, s
     applicant = str(payload.get("applicant_name") or "一位校园用户")
     reason = str(payload.get("reason") or "未填写申请说明")
     applicant_contact = str(payload.get("applicant_contact") or "未填写")
+    round_name = str(payload.get("round_name") or "本轮周期匹配")
+    partner_name = str(payload.get("partner_name") or "一位新搭子")
+    match_score = float(payload.get("score") or 0)
     templates = {
         "activity_application_created": (
             "CampusMate：收到新的活动申请",
@@ -46,6 +49,13 @@ def _render_email(template_key: str, payload: Mapping[str, Any]) -> tuple[str, s
         "activity_cancelled": (
             "CampusMate：活动已取消",
             f"“{title}”已由发起人取消。请登录 CampusMate 查看其他活动。",
+        ),
+        "cycle_match_published": (
+            "CampusMate：本轮搭子匹配结果已公布",
+            f"{round_name} 已经完成匹配。\n\n"
+            f"你的搭子：{partner_name}\n"
+            f"综合匹配度：{match_score:.1f}/100\n\n"
+            "请登录 CampusMate 查看共同时间、地点、联系方式和破冰建议。",
         ),
     }
     return templates.get(

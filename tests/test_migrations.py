@@ -41,7 +41,7 @@ class MigrationTests(unittest.TestCase):
     def test_migrations_are_idempotent_and_create_full_schema(self) -> None:
         database = self.root / "schema.db"
 
-        self.assertEqual([1, 2, 3, 4, 5, 6], run_migrations(database))
+        self.assertEqual([1, 2, 3, 4, 5, 6, 7], run_migrations(database))
         self.assertEqual([], run_migrations(database))
         self.assertEqual(LATEST_SCHEMA_VERSION, current_schema_version(database))
 
@@ -73,6 +73,14 @@ class MigrationTests(unittest.TestCase):
             }
         self.assertIn("attempt_count", application_columns)
         self.assertIn("applicant_contact", application_columns)
+        with transaction(database) as connection:
+            enrollment_columns = {
+                str(row["name"])
+                for row in connection.execute(
+                    "PRAGMA table_info(match_enrollments)"
+                ).fetchall()
+            }
+        self.assertIn("unmatched_reason", enrollment_columns)
         with transaction(database) as connection:
             activity_columns = {
                 str(row["name"])
@@ -107,7 +115,7 @@ class MigrationTests(unittest.TestCase):
 
         self.assertEqual([6], run_migrations(database))
         self.assertEqual([], run_migrations(database))
-        self.assertEqual(6, current_schema_version(database))
+        self.assertEqual(7, current_schema_version(database))
 
     def test_migration_preserves_legacy_users(self) -> None:
         database = self.root / "legacy.db"

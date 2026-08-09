@@ -14,8 +14,10 @@ import json
 import re
 import time
 import uuid
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Iterable, Mapping
+from zoneinfo import ZoneInfo
 
 from services.auth import AuthError, normalize_email
 from services.database import (
@@ -149,6 +151,11 @@ ACTIVITY_IMAGE_DATA_URL_RE = re.compile(
     r"^data:image/(?P<subtype>png|jpeg|webp);base64,(?P<payload>[A-Za-z0-9+/=]+)$"
 )
 MAX_ACTIVITY_IMAGE_BYTES = 1_000_000
+BEIJING_TIMEZONE = ZoneInfo("Asia/Shanghai")
+CYCLE_CUTOFF_WEEKDAY = 6
+CYCLE_CUTOFF_HOUR = 16
+CYCLE_CUTOFF_MINUTE = 30
+CYCLE_MINIMUM_SCORE = 45.0
 
 
 class ServiceError(RuntimeError):
@@ -359,6 +366,11 @@ def matching_profile_missing_fields(
             present = bool(profile.get(field_name))
         if not present:
             missing.append(label)
+    if not any(
+        str(profile.get(key, "")).strip()
+        for key in ("contact_email", "contact_qq", "contact_wechat")
+    ):
+        missing.append("至少一种联系方式")
     return missing
 
 
@@ -1984,18 +1996,63 @@ def enroll_in_match_round(
             raise ValidationError(
                 "参加周期匹配前请补充：" + "、".join(missing_fields)
             )
-        snapshot = {"profile": dict(profile), "interests": [dict(item) for item in interest_rows]}
+        action_card_row = connection.execute(
+            "SELECT profile_json FROM user_profiles WHERE email = ?",
+            (normalized,),
+        ).fetchone()
+        if action_card_row is None:
+            raise ValidationError("请先填写并提交本轮行动卡")
+        try:
+            action_card = json.loads(str(action_card_row["profile_json"]))
+        except (TypeError, ValueError) as error:
+            raise ValidationError("本轮行动卡数据无效，请重新填写") from error
+        if not isinstance(action_card, dict) or not action_card.get("user_id"):
+            raise ValidationError("本轮行动卡不完整，请重新填写")
+        snapshot = {
+            "profile": dict(profile),
+            "interests": [dict(item) for item in interest_rows],
+            "action_card": action_card,
+            "contact": _profile_contact_suggestion(connection, normalized),
+        }
         snapshot_json = _json(snapshot)
         snapshot_hash = hashlib.sha256(snapshot_json.encode("utf-8")).hexdigest()
+        existing = connection.execute(
+            "SELECT status FROM match_enrollments WHERE round_id = ? AND email = ?",
+            (round_id, normalized),
+        ).fetchone()
+        if existing and str(existing["status"]) != "withdrawn":
+            raise ConflictError("你已经报名该轮匹配")
         try:
-            connection.execute(
-                "INSERT INTO match_enrollments(round_id, email, status, enrolled_at, updated_at) VALUES (?, ?, 'enrolled', ?, ?)",
-                (round_id, normalized, now, now),
-            )
-            connection.execute(
-                "INSERT INTO match_profile_snapshots(round_id, email, profile_json, snapshot_hash, created_at) VALUES (?, ?, ?, ?, ?)",
-                (round_id, normalized, snapshot_json, snapshot_hash, now),
-            )
+            if existing:
+                connection.execute(
+                    """
+                    UPDATE match_enrollments
+                    SET status = 'enrolled', unmatched_reason = '', enrolled_at = ?, updated_at = ?
+                    WHERE round_id = ? AND email = ?
+                    """,
+                    (now, now, round_id, normalized),
+                )
+                connection.execute(
+                    """
+                    INSERT INTO match_profile_snapshots(
+                        round_id, email, profile_json, snapshot_hash, created_at
+                    ) VALUES (?, ?, ?, ?, ?)
+                    ON CONFLICT(round_id, email) DO UPDATE SET
+                        profile_json = excluded.profile_json,
+                        snapshot_hash = excluded.snapshot_hash,
+                        created_at = excluded.created_at
+                    """,
+                    (round_id, normalized, snapshot_json, snapshot_hash, now),
+                )
+            else:
+                connection.execute(
+                    "INSERT INTO match_enrollments(round_id, email, status, enrolled_at, updated_at) VALUES (?, ?, 'enrolled', ?, ?)",
+                    (round_id, normalized, now, now),
+                )
+                connection.execute(
+                    "INSERT INTO match_profile_snapshots(round_id, email, profile_json, snapshot_hash, created_at) VALUES (?, ?, ?, ?, ?)",
+                    (round_id, normalized, snapshot_json, snapshot_hash, now),
+                )
         except Exception as error:
             if is_integrity_error(error):
                 raise ConflictError("你已经报名该轮匹配") from error
@@ -2007,3 +2064,571 @@ def enroll_in_match_round(
             entity_type="match_round",
             entity_id=round_id,
         )
+
+
+def weekly_cycle_window(now_timestamp: int | None = None) -> tuple[int, int]:
+    """Return the active Beijing-time weekly window ending Sunday 16:30."""
+
+    now_value = int(now_timestamp if now_timestamp is not None else _now())
+    local_now = datetime.fromtimestamp(now_value, BEIJING_TIMEZONE)
+    days_until_cutoff = (CYCLE_CUTOFF_WEEKDAY - local_now.weekday()) % 7
+    cutoff = (local_now + timedelta(days=days_until_cutoff)).replace(
+        hour=CYCLE_CUTOFF_HOUR,
+        minute=CYCLE_CUTOFF_MINUTE,
+        second=0,
+        microsecond=0,
+    )
+    if cutoff <= local_now:
+        cutoff += timedelta(days=7)
+    opens = cutoff - timedelta(days=7)
+    return int(opens.timestamp()), int(cutoff.timestamp())
+
+
+def _round_creator(connection: DatabaseConnection, actor_email: str | None) -> str:
+    if actor_email:
+        return _require_user(connection, actor_email)
+    row = connection.execute(
+        "SELECT email FROM users WHERE verified = 1 ORDER BY created_at, email LIMIT 1"
+    ).fetchone()
+    if row is None:
+        raise NotFoundError("暂无已验证用户，无法建立匹配轮次")
+    return str(row["email"])
+
+
+def _round_name(closes_at: int) -> str:
+    cutoff = datetime.fromtimestamp(int(closes_at), BEIJING_TIMEZONE)
+    return f"{cutoff:%Y年%m月%d日} 周期搭子匹配"
+
+
+def withdraw_from_match_round(
+    round_id: str,
+    email: str,
+    *,
+    sqlite_path: Path | None = None,
+) -> None:
+    """Withdraw an enrollment before the fixed cutoff."""
+
+    path = _prepare_database(sqlite_path)
+    now = _now()
+    with transaction(path, immediate=True) as connection:
+        normalized = _require_user(connection, email)
+        round_row = connection.execute(
+            connection.select_for_update("SELECT * FROM match_rounds WHERE round_id = ?"),
+            (round_id,),
+        ).fetchone()
+        if round_row is None:
+            raise NotFoundError("匹配轮次不存在")
+        if str(round_row["status"]) != "open" or now >= int(round_row["registration_closes_at"]):
+            raise ConflictError("报名已经截止，不能撤回")
+        cursor = connection.execute(
+            """
+            UPDATE match_enrollments
+            SET status = 'withdrawn', unmatched_reason = '', updated_at = ?
+            WHERE round_id = ? AND email = ? AND status = 'enrolled'
+            """,
+            (now, round_id, normalized),
+        )
+        if int(cursor.rowcount or 0) != 1:
+            raise ConflictError("当前没有可撤回的报名")
+        _audit(
+            connection,
+            actor_email=normalized,
+            action="match_round.withdraw",
+            entity_type="match_round",
+            entity_id=round_id,
+        )
+
+
+def finalize_match_round(
+    round_id: str,
+    *,
+    now_timestamp: int | None = None,
+    force: bool = False,
+    sqlite_path: Path | None = None,
+) -> dict[str, Any]:
+    """Idempotently freeze, globally match, persist, and publish one round."""
+
+    from algorithm.graph_matching import max_weight_matching
+    from algorithm.pipeline import build_match
+
+    path = _prepare_database(sqlite_path)
+    now = int(now_timestamp if now_timestamp is not None else _now())
+    with transaction(path, immediate=True) as connection:
+        round_row = connection.execute(
+            connection.select_for_update("SELECT * FROM match_rounds WHERE round_id = ?"),
+            (round_id,),
+        ).fetchone()
+        if round_row is None:
+            raise NotFoundError("匹配轮次不存在")
+        status = str(round_row["status"])
+        if status == "published":
+            result_count = connection.execute(
+                "SELECT COUNT(*) AS count FROM match_results WHERE round_id = ?",
+                (round_id,),
+            ).fetchone()
+            return {
+                "round_id": round_id,
+                "status": "published",
+                "matched_pairs": int(result_count["count"]),
+                "already_published": True,
+            }
+        if status == "cancelled":
+            raise ConflictError("已取消的轮次不能匹配")
+        if not force and now < int(round_row["registration_closes_at"]):
+            raise ConflictError("报名尚未截止")
+
+        connection.execute(
+            "UPDATE match_rounds SET status = 'matching', updated_at = ? WHERE round_id = ?",
+            (now, round_id),
+        )
+        enrollment_rows = connection.execute(
+            """
+            SELECT e.email, s.profile_json
+            FROM match_enrollments AS e
+            JOIN match_profile_snapshots AS s
+              ON s.round_id = e.round_id AND s.email = e.email
+            WHERE e.round_id = ? AND e.status = 'enrolled'
+            ORDER BY e.enrolled_at, e.email
+            """,
+            (round_id,),
+        ).fetchall()
+
+        snapshots: dict[str, dict[str, Any]] = {}
+        cards_by_id: dict[str, dict[str, Any]] = {}
+        email_by_user_id: dict[str, str] = {}
+        for row in enrollment_rows:
+            try:
+                snapshot = json.loads(str(row["profile_json"]))
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(snapshot, dict):
+                continue
+            card = snapshot.get("action_card")
+            if not isinstance(card, dict) or not card.get("user_id"):
+                continue
+            email = str(row["email"])
+            user_id = str(card["user_id"])
+            snapshots[email] = snapshot
+            cards_by_id[user_id] = card
+            email_by_user_id[user_id] = email
+
+        unmatched_counts = {
+            str(row["email"]): int(row["count"])
+            for row in connection.execute(
+                """
+                SELECT email, COUNT(*) AS count
+                FROM match_enrollments
+                WHERE status = 'unmatched' AND round_id <> ?
+                GROUP BY email
+                """,
+                (round_id,),
+            ).fetchall()
+        }
+        previous_pairs = {
+            frozenset((str(row["email_a"]), str(row["email_b"])))
+            for row in connection.execute(
+                """
+                SELECT first.email AS email_a, second.email AS email_b
+                FROM match_result_members AS first
+                JOIN match_result_members AS second
+                  ON second.result_id = first.result_id AND second.seat = 2
+                WHERE first.seat = 1 AND first.round_id <> ?
+                """,
+                (round_id,),
+            ).fetchall()
+        }
+
+        edges: list[dict[str, Any]] = []
+        cards = list(cards_by_id.values())
+        for index, left in enumerate(cards):
+            for right in cards[index + 1 :]:
+                try:
+                    edge = build_match(left, right)
+                except (KeyError, TypeError, ValueError):
+                    edge = None
+                if edge is None:
+                    continue
+                base_score = float(edge["score"])
+                if base_score < CYCLE_MINIMUM_SCORE:
+                    continue
+                left_email = email_by_user_id[str(edge["user_a"])]
+                right_email = email_by_user_id[str(edge["user_b"])]
+                fairness_bonus = min(
+                    6.0,
+                    1.5
+                    * (
+                        unmatched_counts.get(left_email, 0)
+                        + unmatched_counts.get(right_email, 0)
+                    ),
+                )
+                repeat_penalty = (
+                    12.0
+                    if frozenset((left_email, right_email)) in previous_pairs
+                    else 0.0
+                )
+                edge["base_score"] = round(base_score, 1)
+                edge["fairness_adjustment"] = round(fairness_bonus - repeat_penalty, 1)
+                edge["score"] = round(
+                    max(0.0, min(100.0, base_score + fairness_bonus - repeat_penalty)),
+                    1,
+                )
+                edges.append(edge)
+
+        selected = max_weight_matching(edges)
+        matched_emails: set[str] = set()
+        for match in selected:
+            left_email = email_by_user_id[str(match["user_a"])]
+            right_email = email_by_user_id[str(match["user_b"])]
+            result_id = _new_id("match")
+            explanation = {
+                "base_score": match.get("base_score", match["score"]),
+                "fairness_adjustment": match.get("fairness_adjustment", 0.0),
+                "dimension_scores": match.get("dimension_scores", {}),
+                "reasons": match.get("reasons", []),
+                "common_times": match.get("common_times", []),
+                "common_locations": match.get("common_locations", []),
+            }
+            connection.execute(
+                """
+                INSERT INTO match_results(result_id, round_id, score, explanation_json, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (result_id, round_id, float(match["score"]), _json(explanation), now),
+            )
+            for seat, member_email, partner_email in (
+                (1, left_email, right_email),
+                (2, right_email, left_email),
+            ):
+                connection.execute(
+                    """
+                    INSERT INTO match_result_members(result_id, round_id, email, seat)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    (result_id, round_id, member_email, seat),
+                )
+                matched_emails.add(member_email)
+                partner_name = _display_name(connection, partner_email)
+                _enqueue_notification(
+                    connection,
+                    recipient_email=member_email,
+                    notification_type="cycle_match_published",
+                    title="本轮搭子匹配结果已公布",
+                    message=f"已为你匹配到 {partner_name}，点击查看共同时间、地点和联系方式。",
+                    entity_type="match_round",
+                    entity_id=round_id,
+                    idempotency_key=f"cycle:{round_id}:result:{member_email}",
+                )
+                _enqueue_email_task(
+                    connection,
+                    recipient_email=member_email,
+                    template_key="cycle_match_published",
+                    payload={
+                        "round_name": str(round_row["name"]),
+                        "partner_name": partner_name,
+                        "score": float(match["score"]),
+                    },
+                    idempotency_key=f"cycle:{round_id}:mail:{member_email}",
+                )
+
+        all_enrolled = {str(row["email"]) for row in enrollment_rows}
+        edge_members = {
+            email_by_user_id[user_id]
+            for edge in edges
+            for user_id in (str(edge["user_a"]), str(edge["user_b"]))
+        }
+        for email in sorted(all_enrolled):
+            if email in matched_emails:
+                connection.execute(
+                    """
+                    UPDATE match_enrollments
+                    SET status = 'matched', unmatched_reason = '', updated_at = ?
+                    WHERE round_id = ? AND email = ?
+                    """,
+                    (now, round_id, email),
+                )
+                continue
+            if email not in snapshots:
+                reason = "行动卡数据无效，请在下一轮重新填写"
+            elif email not in edge_members:
+                reason = "本轮没有同时满足时间、地点和其他硬条件的搭子"
+            else:
+                reason = "本轮人数为奇数或全局组合限制，未能形成稳定配对"
+            connection.execute(
+                """
+                UPDATE match_enrollments
+                SET status = 'unmatched', unmatched_reason = ?, updated_at = ?
+                WHERE round_id = ? AND email = ?
+                """,
+                (reason, now, round_id, email),
+            )
+            _enqueue_notification(
+                connection,
+                recipient_email=email,
+                notification_type="cycle_match_unmatched",
+                title="本轮暂未匹配成功",
+                message=reason + "。下一轮已经开放，可以继续报名。",
+                entity_type="match_round",
+                entity_id=round_id,
+                idempotency_key=f"cycle:{round_id}:unmatched:{email}",
+            )
+
+        connection.execute(
+            """
+            UPDATE match_rounds
+            SET status = 'published', results_at = ?, updated_at = ?
+            WHERE round_id = ?
+            """,
+            (now, now, round_id),
+        )
+        _audit(
+            connection,
+            actor_email=None,
+            action="match_round.publish",
+            entity_type="match_round",
+            entity_id=round_id,
+            details={
+                "enrolled": len(all_enrolled),
+                "matched_pairs": len(selected),
+                "unmatched": len(all_enrolled - matched_emails),
+            },
+        )
+        return {
+            "round_id": round_id,
+            "status": "published",
+            "enrolled": len(all_enrolled),
+            "matched_pairs": len(selected),
+            "unmatched": len(all_enrolled - matched_emails),
+            "already_published": False,
+        }
+
+
+def ensure_cycle_match_round(
+    actor_email: str | None = None,
+    *,
+    now_timestamp: int | None = None,
+    sqlite_path: Path | None = None,
+) -> dict[str, Any]:
+    """Finalize overdue rounds and guarantee one active weekly round."""
+
+    path = _prepare_database(sqlite_path)
+    now = int(now_timestamp if now_timestamp is not None else _now())
+    with transaction(path) as connection:
+        overdue = connection.execute(
+            """
+            SELECT round_id FROM match_rounds
+            WHERE status IN ('open', 'closed', 'matching')
+              AND registration_closes_at <= ?
+            ORDER BY registration_closes_at
+            """,
+            (now,),
+        ).fetchall()
+    finalized = [
+        finalize_match_round(
+            str(row["round_id"]),
+            now_timestamp=now,
+            sqlite_path=path,
+        )
+        for row in overdue
+    ]
+
+    opens_at, closes_at = weekly_cycle_window(now)
+    with transaction(path, immediate=True) as connection:
+        existing = connection.execute(
+            "SELECT * FROM match_rounds WHERE registration_closes_at = ?",
+            (closes_at,),
+        ).fetchone()
+        if existing is None:
+            creator = _round_creator(connection, actor_email)
+            round_id = _new_id("round")
+            try:
+                connection.execute(
+                    """
+                    INSERT INTO match_rounds(
+                        round_id, name, status, registration_opens_at,
+                        registration_closes_at, results_at, created_by_email,
+                        created_at, updated_at
+                    ) VALUES (?, ?, 'open', ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        round_id,
+                        _round_name(closes_at),
+                        opens_at,
+                        closes_at,
+                        closes_at,
+                        creator,
+                        now,
+                        now,
+                    ),
+                )
+            except Exception as error:
+                if not is_integrity_error(error):
+                    raise
+                existing = connection.execute(
+                    "SELECT * FROM match_rounds WHERE registration_closes_at = ?",
+                    (closes_at,),
+                ).fetchone()
+            else:
+                existing = connection.execute(
+                    "SELECT * FROM match_rounds WHERE round_id = ?", (round_id,)
+                ).fetchone()
+                _audit(
+                    connection,
+                    actor_email=creator,
+                    action="match_round.auto_create",
+                    entity_type="match_round",
+                    entity_id=round_id,
+                )
+        if existing is None:
+            raise ConflictError("无法建立当前匹配轮次")
+        current = dict(existing)
+        count_row = connection.execute(
+            """
+            SELECT COUNT(*) AS count FROM match_enrollments
+            WHERE round_id = ? AND status = 'enrolled'
+            """,
+            (str(current["round_id"]),),
+        ).fetchone()
+        current["enrollment_count"] = int(count_row["count"])
+    return {"current_round": current, "finalized": finalized}
+
+
+def get_cycle_match_overview(
+    email: str,
+    *,
+    now_timestamp: int | None = None,
+    sqlite_path: Path | None = None,
+) -> dict[str, Any]:
+    """Return current enrollment state and the user's latest published result."""
+
+    path = _prepare_database(sqlite_path)
+    normalized = normalize_email(email)
+    now = int(now_timestamp if now_timestamp is not None else _now())
+    with transaction(path) as connection:
+        _require_user(connection, normalized)
+        current = connection.execute(
+            """
+            SELECT * FROM match_rounds
+            WHERE status = 'open' AND registration_closes_at > ?
+            ORDER BY registration_closes_at LIMIT 1
+            """,
+            (now,),
+        ).fetchone()
+        current_dict = dict(current) if current else None
+        enrollment = None
+        if current_dict:
+            enrollment_row = connection.execute(
+                """
+                SELECT * FROM match_enrollments
+                WHERE round_id = ? AND email = ?
+                """,
+                (str(current_dict["round_id"]), normalized),
+            ).fetchone()
+            enrollment = dict(enrollment_row) if enrollment_row else None
+            count_row = connection.execute(
+                """
+                SELECT COUNT(*) AS count FROM match_enrollments
+                WHERE round_id = ? AND status = 'enrolled'
+                """,
+                (str(current_dict["round_id"]),),
+            ).fetchone()
+            current_dict["enrollment_count"] = int(count_row["count"])
+        latest = connection.execute(
+            """
+            SELECT r.*, e.status AS enrollment_status, e.unmatched_reason
+            FROM match_rounds AS r
+            JOIN match_enrollments AS e ON e.round_id = r.round_id
+            WHERE e.email = ? AND r.status = 'published'
+            ORDER BY r.results_at DESC LIMIT 1
+            """,
+            (normalized,),
+        ).fetchone()
+        action_card = connection.execute(
+            "SELECT 1 FROM user_profiles WHERE email = ?", (normalized,)
+        ).fetchone()
+    return {
+        "current_round": current_dict,
+        "enrollment": enrollment,
+        "latest_result_round": dict(latest) if latest else None,
+        "has_action_card": action_card is not None,
+        "missing_profile_fields": validate_profile_for_matching(
+            normalized, sqlite_path=path
+        ),
+    }
+
+
+def get_match_result_for_user(
+    email: str,
+    *,
+    round_id: str | None = None,
+    sqlite_path: Path | None = None,
+) -> dict[str, Any] | None:
+    """Load one durable published result, including the matched contact."""
+
+    path = _prepare_database(sqlite_path)
+    normalized = normalize_email(email)
+    with transaction(path) as connection:
+        _require_user(connection, normalized)
+        parameters: list[Any] = [normalized]
+        round_clause = ""
+        if round_id:
+            round_clause = "AND r.round_id = ?"
+            parameters.append(str(round_id))
+        membership = connection.execute(
+            f"""
+            SELECT r.*, e.status AS enrollment_status, e.unmatched_reason,
+                   m.result_id, mr.score, mr.explanation_json
+            FROM match_rounds AS r
+            JOIN match_enrollments AS e
+              ON e.round_id = r.round_id AND e.email = ?
+            LEFT JOIN match_result_members AS m
+              ON m.round_id = r.round_id AND m.email = e.email
+            LEFT JOIN match_results AS mr ON mr.result_id = m.result_id
+            WHERE r.status = 'published' {round_clause}
+            ORDER BY r.results_at DESC LIMIT 1
+            """,
+            parameters,
+        ).fetchone()
+        if membership is None:
+            return None
+        result = dict(membership)
+        result["explanation"] = (
+            json.loads(str(result["explanation_json"]))
+            if result.get("explanation_json")
+            else {}
+        )
+        if not result.get("result_id"):
+            return result
+        own_snapshot_row = connection.execute(
+            """
+            SELECT profile_json FROM match_profile_snapshots
+            WHERE round_id = ? AND email = ?
+            """,
+            (str(result["round_id"]), normalized),
+        ).fetchone()
+        if own_snapshot_row:
+            try:
+                own_snapshot = json.loads(str(own_snapshot_row["profile_json"]))
+            except (TypeError, ValueError):
+                own_snapshot = {}
+            result["own_action_card"] = own_snapshot.get("action_card", {})
+        partner_row = connection.execute(
+            """
+            SELECT m.email, s.profile_json
+            FROM match_result_members AS m
+            JOIN match_profile_snapshots AS s
+              ON s.round_id = m.round_id AND s.email = m.email
+            WHERE m.result_id = ? AND m.email <> ?
+            """,
+            (str(result["result_id"]), normalized),
+        ).fetchone()
+        if partner_row:
+            partner_email = str(partner_row["email"])
+            try:
+                partner_snapshot = json.loads(str(partner_row["profile_json"]))
+            except (TypeError, ValueError):
+                partner_snapshot = {}
+            result["partner_email"] = partner_email
+            result["partner_name"] = _display_name(connection, partner_email)
+            result["partner_contact"] = str(partner_snapshot.get("contact", ""))
+            result["partner_action_card"] = partner_snapshot.get("action_card", {})
+        return result

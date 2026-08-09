@@ -5,6 +5,9 @@ import tempfile
 import time
 import unittest
 import base64
+import json
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
 from pathlib import Path
@@ -23,7 +26,11 @@ from services.platform_service import (
     create_match_round,
     end_activity,
     enroll_in_match_round,
+    ensure_cycle_match_round,
+    finalize_match_round,
     get_activity,
+    get_cycle_match_overview,
+    get_match_result_for_user,
     get_profile,
     get_visible_profile,
     leave_activity,
@@ -38,6 +45,8 @@ from services.platform_service import (
     update_activity,
     upsert_profile,
     validate_profile_for_matching,
+    weekly_cycle_window,
+    withdraw_from_match_round,
     withdraw_activity_application,
 )
 
@@ -100,6 +109,47 @@ class PlatformServiceTests(unittest.TestCase):
             privacy={"contact_email": "activity_members", "contact_qq": "matched"},
             sqlite_path=self.database,
         )
+
+    def save_action_card(self, email: str, user_id: str) -> None:
+        card = {
+            "schema_version": "1.0.0",
+            "user_id": user_id,
+            "match_type": "study",
+            "activity": "python",
+            "available_times": ["sun_18_00", "sun_18_30", "sun_19_00"],
+            "min_session_minutes": 60,
+            "acceptable_locations": ["pku_library"],
+            "allow_off_campus": False,
+            "group_size_preference": "one_to_one",
+            "self_level": "novice",
+            "acceptable_partner_levels": ["novice", "basic"],
+            "hard_restrictions": ["no_off_campus"],
+            "goal": "exam_prep",
+            "intensity": 2,
+            "communication_style": "balanced",
+            "planning_style": "planned",
+            "supervision_preference": 3,
+            "punctuality_importance": 4,
+            "cancellation_tolerance": 2,
+            "organization_role": "participant",
+            "interests": ["programming", "ai"],
+            "self_description": "希望按计划完成本周学习任务",
+            "partner_expectation": "希望对方守时并愿意沟通",
+            "preference_weights": {
+                "time": 0.25,
+                "level": 0.2,
+                "goal": 0.2,
+                "planning": 0.15,
+                "communication": 0.1,
+                "interest": 0.05,
+                "text": 0.05,
+            },
+        }
+        with transaction(self.database) as connection:
+            connection.execute(
+                "INSERT OR REPLACE INTO user_profiles(email, profile_json, updated_at) VALUES (?, ?, ?)",
+                (email, json.dumps(card, ensure_ascii=False), int(time.time())),
+            )
 
     def test_profile_round_trip_keeps_interests_and_privacy(self) -> None:
         self.save_profile("member1@example.com", "小北")
@@ -865,6 +915,7 @@ class PlatformServiceTests(unittest.TestCase):
 
     def test_match_enrollment_is_unique_and_saves_snapshot(self) -> None:
         self.save_profile("member1@example.com", "小北")
+        self.save_action_card("member1@example.com", "U0052")
         now = int(time.time())
         round_id = create_match_round(
             "owner@example.com",
@@ -893,6 +944,78 @@ class PlatformServiceTests(unittest.TestCase):
             )
         self.assertEqual(1, enrollment_count)
         self.assertEqual(1, snapshot_count)
+
+
+    def test_weekly_round_closes_sunday_at_1630_beijing(self) -> None:
+        saturday = int(datetime(2026, 8, 8, 12, tzinfo=ZoneInfo("Asia/Shanghai")).timestamp())
+        _opens_at, closes_at = weekly_cycle_window(saturday)
+        cutoff = datetime.fromtimestamp(closes_at, ZoneInfo("Asia/Shanghai"))
+        self.assertEqual((6, 16, 30), (cutoff.weekday(), cutoff.hour, cutoff.minute))
+
+    def test_cycle_round_finalizes_real_enrollments_and_opens_next(self) -> None:
+        for email, user_id in USERS[:2]:
+            self.save_profile(email, email.split("@", 1)[0])
+            self.save_action_card(email, user_id)
+        now = int(time.time())
+        round_id = create_match_round(
+            "owner@example.com",
+            name="自动匹配测试",
+            registration_opens_at=now - 600,
+            registration_closes_at=now + 60,
+            results_at=now + 60,
+            status="open",
+            sqlite_path=self.database,
+        )
+        for email, _user_id in USERS[:2]:
+            enroll_in_match_round(round_id, email, sqlite_path=self.database)
+
+        summary = finalize_match_round(
+            round_id,
+            now_timestamp=now + 61,
+            sqlite_path=self.database,
+        )
+        self.assertEqual(1, summary["matched_pairs"])
+        result = get_match_result_for_user(
+            "owner@example.com", round_id=round_id, sqlite_path=self.database
+        )
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual("matched", result["enrollment_status"])
+        self.assertTrue(result["partner_contact"])
+
+        cycle = ensure_cycle_match_round(
+            "owner@example.com",
+            now_timestamp=now + 61,
+            sqlite_path=self.database,
+        )
+        self.assertEqual("open", cycle["current_round"]["status"])
+        overview = get_cycle_match_overview(
+            "owner@example.com",
+            now_timestamp=now + 61,
+            sqlite_path=self.database,
+        )
+        self.assertIsNotNone(overview["latest_result_round"])
+
+    def test_cycle_enrollment_can_be_withdrawn_and_resubmitted(self) -> None:
+        self.save_profile("member1@example.com", "member1")
+        self.save_action_card("member1@example.com", "U0052")
+        now = int(time.time())
+        round_id = create_match_round(
+            "owner@example.com",
+            name="撤回测试",
+            registration_opens_at=now - 60,
+            registration_closes_at=now + 600,
+            results_at=now + 600,
+            status="open",
+            sqlite_path=self.database,
+        )
+        enroll_in_match_round(round_id, "member1@example.com", sqlite_path=self.database)
+        withdraw_from_match_round(round_id, "member1@example.com", sqlite_path=self.database)
+        enroll_in_match_round(round_id, "member1@example.com", sqlite_path=self.database)
+        overview = get_cycle_match_overview(
+            "member1@example.com", now_timestamp=now, sqlite_path=self.database
+        )
+        self.assertEqual("enrolled", overview["enrollment"]["status"])
 
 
 if __name__ == "__main__":

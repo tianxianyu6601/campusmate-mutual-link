@@ -424,14 +424,14 @@ if st.session_state.get("current_profile"):
                 "This session already has a validated action card. You can edit and resubmit it.",
             )
         )
-    matching_page = PROJECT_ROOT / "pages" / "matching.py"
+    matching_page = PROJECT_ROOT / "pages" / "cycle_match.py"
     if matching_page.exists():
         if st.button(
             tr(language, "进入匹配页面", "Continue to Matching"),
             type="primary",
             use_container_width=True,
         ):
-            st.switch_page("pages/matching.py")
+            st.switch_page("pages/cycle_match.py")
     else:
         st.info(
             tr(
