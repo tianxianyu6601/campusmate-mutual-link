@@ -8,7 +8,7 @@ from pathlib import Path
 from services.database import transaction
 from services.email_tasks import process_email_tasks
 from services.migrations import run_migrations
-from services.platform_service import apply_to_activity, create_activity
+from services.platform_service import apply_to_activity, create_activity, upsert_profile
 
 
 class EmailTaskTests(unittest.TestCase):
@@ -24,6 +24,12 @@ class EmailTaskTests(unittest.TestCase):
             connection.execute(
                 "INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)",
                 ("member@example.com", "U0052", "hash", "salt", 1, 1),
+            )
+        for email in ("owner@example.com", "member@example.com"):
+            upsert_profile(
+                email,
+                {"display_name": email.split("@", 1)[0], "contact_email": email},
+                sqlite_path=self.database,
             )
         self.activity_id = create_activity(
             "owner@example.com",

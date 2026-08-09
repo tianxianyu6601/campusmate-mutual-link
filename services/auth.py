@@ -155,12 +155,11 @@ def _current_session_token() -> str | None:
     return str(cookie_value) if cookie_value else None
 
 
-def write_session_cookie(token: str, *, redirect_to: str | None = None) -> None:
-    """Write the opaque browser token and optionally start a fresh page session."""
+def write_session_cookie(token: str) -> None:
+    """Write the opaque browser token without triggering iframe navigation."""
 
     token_json = json.dumps(str(token))
     name_json = json.dumps(SESSION_COOKIE_NAME)
-    redirect_json = json.dumps(redirect_to)
     st.html(
         f"""
         <span style="display:none" aria-hidden="true"></span>
@@ -168,12 +167,8 @@ def write_session_cookie(token: str, *, redirect_to: str | None = None) -> None:
           (() => {{
             const campusMateCookieName = {name_json};
             const campusMateToken = {token_json};
-            const campusMateRedirectTo = {redirect_json};
             const campusMateSecure = window.location.protocol === "https:" ? "; Secure" : "";
             document.cookie = `${{campusMateCookieName}}=${{encodeURIComponent(campusMateToken)}}; Max-Age={SESSION_TTL_SECONDS}; Path=/; SameSite=Strict${{campusMateSecure}}`;
-            if (campusMateRedirectTo) {{
-              window.setTimeout(() => window.location.replace(campusMateRedirectTo), 25);
-            }}
           }})();
         </script>
         """,
@@ -182,23 +177,18 @@ def write_session_cookie(token: str, *, redirect_to: str | None = None) -> None:
     )
 
 
-def clear_session_cookie(*, redirect_to: str | None = None) -> None:
-    """Remove the browser token and optionally return to a clean login session."""
+def clear_session_cookie() -> None:
+    """Remove the browser token without triggering iframe navigation."""
 
     name_json = json.dumps(SESSION_COOKIE_NAME)
-    redirect_json = json.dumps(redirect_to)
     st.html(
         f"""
         <span style="display:none" aria-hidden="true"></span>
         <script>
           (() => {{
             const campusMateCookieName = {name_json};
-            const campusMateRedirectTo = {redirect_json};
             const campusMateSecure = window.location.protocol === "https:" ? "; Secure" : "";
             document.cookie = `${{campusMateCookieName}}=; Max-Age=0; Path=/; SameSite=Strict${{campusMateSecure}}`;
-            if (campusMateRedirectTo) {{
-              window.setTimeout(() => window.location.replace(campusMateRedirectTo), 25);
-            }}
           }})();
         </script>
         """,

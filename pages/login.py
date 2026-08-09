@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 import streamlit as st
 
 from services.auth import (
@@ -133,8 +135,10 @@ with st.container(key="login_shell"):
                 except AuthError as error:
                     st.error(str(error))
                 else:
-                    write_session_cookie(token, redirect_to="/")
-                    st.stop()
+                    write_session_cookie(token)
+                    # Let the browser apply the cookie delta before this page is replaced.
+                    time.sleep(0.15)
+                    st.switch_page("pages/home.py")
 
             if st.button("忘记密码？点击重置"):
                 st.session_state.login_mode_next = "重置密码"

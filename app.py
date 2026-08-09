@@ -10,6 +10,7 @@ Individual pages consume the stable interfaces delivered by Part 1.
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any
 
@@ -119,8 +120,10 @@ def _logout() -> None:
             if isinstance(default_value, dict)
             else default_value
         )
-    clear_session_cookie(redirect_to="/")
-    st.stop()
+    clear_session_cookie()
+    # Let the browser clear the cookie before the rerun removes this component.
+    time.sleep(0.15)
+    st.rerun()
 
 
 def _request_logout() -> None:
@@ -326,13 +329,15 @@ st.markdown(
         font-weight: 650;
       }
       div[data-testid="stFormSubmitButton"] > button {
-        width: 100% !important;
+        width: auto !important;
+        min-width: 8.5rem !important;
         min-height: 3.25rem !important;
         background: #ffffff !important;
         border: 2px solid #111111 !important;
         border-radius: 0.35rem !important;
         color: #111111 !important;
         box-shadow: none !important;
+        white-space: nowrap !important;
       }
       div[data-testid="stFormSubmitButton"] > button:hover {
         background: #eef4ff !important;
@@ -340,10 +345,11 @@ st.markdown(
       }
       div[data-testid="stFormSubmitButton"] > button p,
       div[data-testid="stFormSubmitButton"] > button span {
-        width: 100% !important;
+        width: auto !important;
         margin: 0 !important;
         color: #111111 !important;
         text-align: center !important;
+        white-space: nowrap !important;
       }
       [data-testid="stMain"] div[data-testid="stButton"] > button[kind="primary"],
       [data-testid="stMain"] div[data-testid="stFormSubmitButton"] > button[kind="primary"] {

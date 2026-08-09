@@ -323,11 +323,21 @@ ACTIVITY_WORKFLOW_SCHEMA = Migration(
 )
 
 
+PROFILE_CONTACT_SCHEMA = Migration(
+    version=5,
+    name="profile_contact_schema",
+    statements=(
+        "ALTER TABLE profiles ADD COLUMN contact_qq TEXT NOT NULL DEFAULT ''",
+    ),
+)
+
+
 MIGRATIONS = (
     BASE_SCHEMA,
     UNIFIED_PLATFORM_SCHEMA,
     PROFILE_EXPERIENCE_SCHEMA,
     ACTIVITY_WORKFLOW_SCHEMA,
+    PROFILE_CONTACT_SCHEMA,
 )
 LATEST_SCHEMA_VERSION = MIGRATIONS[-1].version
 _MIGRATION_CACHE: set[tuple[str, str]] = set()

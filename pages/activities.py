@@ -21,6 +21,7 @@ from services.platform_service import (
     create_activity,
     end_activity,
     get_activity,
+    get_visible_profile,
     leave_activity,
     list_activities,
     list_activity_applications,
@@ -113,34 +114,27 @@ def _category_name(activity: dict[str, Any]) -> str:
     return CATEGORY_LABELS.get(str(activity["category"]), str(activity["category"]))
 
 
-def _clear_query_parameter(name: str) -> None:
-    if name in st.query_params:
-        del st.query_params[name]
-
-
 def _open_plaza() -> None:
-    _clear_query_parameter("activity")
-    _clear_query_parameter("mode")
-    st.rerun()
+    st.switch_page("pages/activities.py")
 
 
 def _open_detail(activity_id: str) -> None:
-    st.query_params["activity"] = activity_id
-    _clear_query_parameter("mode")
-    st.rerun()
+    st.switch_page(
+        "pages/activities.py",
+        query_params={"activity": activity_id},
+    )
 
 
 def _open_publisher(activity_id: str | None = None) -> None:
-    st.query_params["mode"] = "edit" if activity_id else "publish"
     if activity_id:
-        st.query_params["activity"] = activity_id
         st.session_state["activity_publish_step"] = 2
+        query_params = {"mode": "edit", "activity": activity_id}
     else:
-        _clear_query_parameter("activity")
         st.session_state["activity_publish_step"] = 1
         st.session_state.pop("activity_publish_category", None)
         st.session_state.pop("activity_publish_custom_category", None)
-    st.rerun()
+        query_params = {"mode": "publish"}
+    st.switch_page("pages/activities.py", query_params=query_params)
 
 
 def _uploaded_image_data_url(uploaded_file: Any) -> str:
@@ -290,6 +284,66 @@ APPLICATION_STATUS_LABELS = {
 }
 
 
+@st.dialog("同学资料", icon=":material/account_circle:", width="large")
+def _show_visible_profile(viewer_email: str, subject_email: str) -> None:
+    """Show only the fields the profile owner has permitted this viewer to see."""
+
+    try:
+        profile = get_visible_profile(viewer_email, subject_email)
+    except ServiceError as error:
+        st.error(str(error))
+        return
+    if profile is None:
+        st.info("这位同学还没有填写个人资料。")
+        return
+
+    avatar = str(profile.get("avatar_data_url") or "")
+    header_left, header_right = st.columns([1, 4], vertical_alignment="center")
+    with header_left:
+        if avatar:
+            st.image(avatar, width=96)
+        else:
+            st.markdown("### 👤")
+    with header_right:
+        st.subheader(str(profile.get("display_name") or "校园用户"))
+        identity_parts = [
+            str(profile.get(field_name) or "")
+            for field_name in ("school", "department", "grade", "identity_label")
+        ]
+        identity_text = " · ".join(part for part in identity_parts if part)
+        if identity_text:
+            st.caption(identity_text)
+        if profile.get("bio"):
+            st.write(str(profile["bio"]))
+
+    interests = profile.get("interests") or []
+    if interests:
+        st.markdown("**兴趣标签**")
+        st.write(" · ".join(str(item.get("tag", "")) for item in interests if item.get("tag")))
+
+    descriptions = (
+        ("我是什么样的人", "self_description"),
+        ("我想找什么样的人", "partner_expectation"),
+    )
+    for label, field_name in descriptions:
+        if profile.get(field_name):
+            st.markdown(f"**{label}**")
+            st.write(str(profile[field_name]))
+
+    contacts = [
+        ("邮箱", str(profile.get("contact_email") or "")),
+        ("QQ", str(profile.get("contact_qq") or "")),
+        ("微信", str(profile.get("contact_wechat") or "")),
+    ]
+    visible_contacts = [(label, value) for label, value in contacts if value]
+    if visible_contacts:
+        st.markdown("**联系方式**")
+        for label, value in visible_contacts:
+            st.write(f"{label}：{value}")
+    else:
+        st.caption("对方没有向你公开联系方式。")
+
+
 def _render_organizer_workflow(activity: dict[str, Any], email: str) -> None:
     activity_id = str(activity["activity_id"])
     st.subheader("申请管理")
@@ -310,6 +364,12 @@ def _render_organizer_workflow(activity: dict[str, Any], email: str) -> None:
                 st.badge("待审核", color="orange")
             st.write(str(application.get("reason") or "未填写申请说明"))
             with st.container(horizontal=True):
+                if st.button(
+                    "查看资料",
+                    key=f"profile_{application_id}",
+                    icon=":material/person_search:",
+                ):
+                    _show_visible_profile(email, str(application["applicant_email"]))
                 if st.button(
                     "同意加入",
                     key=f"approve_{application_id}",
@@ -430,6 +490,12 @@ def _render_member_roster(activity: dict[str, Any], email: str) -> None:
         role = str(member["role"])
         with st.container(border=True, horizontal=True, vertical_alignment="center"):
             st.write(f"**{member_name}**" + (" · 发起人" if role == "organizer" else ""))
+            if st.button(
+                "查看资料",
+                key=f"member_profile_{activity_id}_{member_email}",
+                icon=":material/person_search:",
+            ):
+                _show_visible_profile(email, member_email)
             if (
                 activity["is_organizer"]
                 and role != "organizer"
@@ -628,11 +694,14 @@ def _render_activity_form(email: str, existing: dict[str, Any] | None = None) ->
         default_end,
     )
     existing_location = str(existing.get("location_text", "")) if existing else ""
-    location_options = list(
-        dict.fromkeys((*LOCATION_OPTIONS, *((existing_location,) if existing_location else ())))
-    )
+    location_options = list(LOCATION_OPTIONS)
     location_index = (
-        location_options.index(existing_location) if existing_location else None
+        location_options.index(existing_location)
+        if existing_location in location_options
+        else None
+    )
+    custom_location_value = (
+        existing_location if existing_location and existing_location not in location_options else ""
     )
 
     with st.form("activity_editor"):
@@ -683,11 +752,16 @@ def _render_activity_form(email: str, existing: dict[str, Any] | None = None) ->
                 step=timedelta(minutes=15),
             )
         location = st.selectbox(
-            "活动地点*",
+            "常用活动地点",
             options=location_options,
             index=location_index,
-            accept_new_options=True,
-            placeholder="选择或输入活动地点",
+            placeholder="请选择常用地点",
+        )
+        custom_location = st.text_input(
+            "自定义活动地点",
+            value=custom_location_value,
+            max_chars=160,
+            placeholder="例如：北京市海淀区某咖啡馆（填写后优先使用）",
         )
 
         st.subheader("参与设置")
@@ -717,11 +791,13 @@ def _render_activity_form(email: str, existing: dict[str, Any] | None = None) ->
                 "保存草稿",
                 icon=":material/draft:",
                 disabled=bool(existing and existing.get("status") == "published"),
+                width="content",
             )
             publish = st.form_submit_button(
                 "保存并发布" if is_editing else "发布活动",
                 type="primary",
                 icon=":material/publish:",
+                width="content",
             )
 
     if not (save_draft or publish):
@@ -731,6 +807,10 @@ def _render_activity_form(email: str, existing: dict[str, Any] | None = None) ->
         return
     if has_end_time and end_time is None:
         st.error("请选择结束时间")
+        return
+    final_location = custom_location.strip() or str(location or "").strip()
+    if not final_location:
+        st.error("请选择常用活动地点或填写自定义活动地点")
         return
     image_url = str(existing.get("image_url", "")) if existing else ""
     if remove_image:
@@ -754,7 +834,7 @@ def _render_activity_form(email: str, existing: dict[str, Any] | None = None) ->
                 image_url=image_url,
                 starts_at=_to_timestamp(start_time),
                 ends_at=_to_timestamp(end_time) if end_time else None,
-                location_text=str(location or ""),
+                location_text=final_location,
                 capacity=int(capacity),
                 visibility=visibility,
                 approval_required=approval_required,
@@ -772,7 +852,7 @@ def _render_activity_form(email: str, existing: dict[str, Any] | None = None) ->
                 image_url=image_url,
                 starts_at=_to_timestamp(start_time),
                 ends_at=_to_timestamp(end_time) if end_time else None,
-                location_text=str(location or ""),
+                location_text=final_location,
                 capacity=int(capacity),
                 visibility=visibility,
                 approval_required=approval_required,
@@ -784,13 +864,11 @@ def _render_activity_form(email: str, existing: dict[str, Any] | None = None) ->
     st.session_state.pop("activity_publish_step", None)
     st.session_state.pop("activity_publish_category", None)
     st.session_state.pop("activity_publish_custom_category", None)
-    st.query_params["activity"] = activity_id
-    _clear_query_parameter("mode")
     st.toast(
         "活动已发布" if requested_status == "published" else "草稿已保存",
         icon=":material/check_circle:",
     )
-    st.rerun()
+    _open_detail(activity_id)
 
 
 def _render_publisher(email: str, activity_id: str | None) -> None:

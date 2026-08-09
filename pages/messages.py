@@ -84,5 +84,7 @@ else:
                     )
                 ):
                     mark_notification_read(email, notification_id)
-                    st.query_params["activity"] = str(notification["entity_id"])
-                    st.switch_page("pages/activities.py")
+                    st.switch_page(
+                        "pages/activities.py",
+                        query_params={"activity": str(notification["entity_id"])},
+                    )

@@ -41,7 +41,7 @@ class MigrationTests(unittest.TestCase):
     def test_migrations_are_idempotent_and_create_full_schema(self) -> None:
         database = self.root / "schema.db"
 
-        self.assertEqual([1, 2, 3, 4], run_migrations(database))
+        self.assertEqual([1, 2, 3, 4, 5], run_migrations(database))
         self.assertEqual([], run_migrations(database))
         self.assertEqual(LATEST_SCHEMA_VERSION, current_schema_version(database))
 
@@ -63,6 +63,7 @@ class MigrationTests(unittest.TestCase):
                 for row in connection.execute("PRAGMA table_info(profiles)").fetchall()
             }
         self.assertIn("avatar_data_url", profile_columns)
+        self.assertIn("contact_qq", profile_columns)
         with transaction(database) as connection:
             application_columns = {
                 str(row["name"])

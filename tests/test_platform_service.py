@@ -60,6 +60,13 @@ class PlatformServiceTests(unittest.TestCase):
                     "INSERT INTO users VALUES (?, ?, ?, ?, ?, ?)",
                     (email, user_id, "hash", "salt", 1, 1),
                 )
+        for email, _ in USERS:
+            upsert_profile(
+                email,
+                {"display_name": email.split("@", 1)[0], "contact_email": email},
+                privacy={"contact_email": "activity_members"},
+                sqlite_path=self.database,
+            )
 
     def tearDown(self) -> None:
         self.tempdir.cleanup()
@@ -85,10 +92,12 @@ class PlatformServiceTests(unittest.TestCase):
                 "preferred_locations": ["校内"],
                 "self_description": "慢热但熟悉后很健谈",
                 "partner_expectation": "希望对方守时、沟通直接",
+                "contact_email": email,
+                "contact_qq": "123456",
                 "completion_percent": 80,
             },
             interests=[("sport", "羽毛球"), ("study", "Python")],
-            privacy={"contact_wechat": "matched"},
+            privacy={"contact_email": "activity_members", "contact_qq": "matched"},
             sqlite_path=self.database,
         )
 
@@ -108,7 +117,11 @@ class PlatformServiceTests(unittest.TestCase):
             ],
             profile["interests"],
         )
-        self.assertEqual({"contact_wechat": "matched"}, profile["privacy"])
+        self.assertEqual("123456", profile["contact_qq"])
+        self.assertEqual(
+            {"contact_email": "activity_members", "contact_qq": "matched"},
+            profile["privacy"],
+        )
         self.assertEqual(70, profile["completion_percent"])
         self.assertEqual([], validate_profile_for_matching("member1@example.com", sqlite_path=self.database))
 
@@ -139,6 +152,13 @@ class PlatformServiceTests(unittest.TestCase):
                 interests=[("unknown", "测试")],
                 sqlite_path=self.database,
             )
+
+        with self.assertRaisesRegex(ValidationError, "QQ号"):
+            upsert_profile(
+                "member1@example.com",
+                {"display_name": "小北", "contact_qq": "QQ-123"},
+                sqlite_path=self.database,
+            )
         with self.assertRaisesRegex(ValidationError, "隐私"):
             upsert_profile(
                 "member1@example.com",
@@ -146,6 +166,45 @@ class PlatformServiceTests(unittest.TestCase):
                 privacy={"password": "public"},
                 sqlite_path=self.database,
             )
+
+    def test_activity_publish_and_apply_require_a_contact_method(self) -> None:
+        upsert_profile(
+            "owner@example.com",
+            {"display_name": "发起人"},
+            sqlite_path=self.database,
+        )
+        activity_values = {
+            "category": "sport",
+            "title": "联系方式校验",
+            "description": "测试",
+            "starts_at": int(time.time()) + 3600,
+            "location_text": "自定义地点",
+            "capacity": 3,
+            "sqlite_path": self.database,
+        }
+        with self.assertRaisesRegex(ValidationError, "至少一项"):
+            create_activity("owner@example.com", **activity_values)
+
+        draft_id = create_activity(
+            "owner@example.com", status="draft", **activity_values
+        )
+        with self.assertRaisesRegex(ValidationError, "至少一项"):
+            publish_activity(draft_id, "owner@example.com", sqlite_path=self.database)
+
+        upsert_profile(
+            "owner@example.com",
+            {"display_name": "发起人", "contact_wechat": "campusmate_owner"},
+            sqlite_path=self.database,
+        )
+        publish_activity(draft_id, "owner@example.com", sqlite_path=self.database)
+
+        upsert_profile(
+            "member1@example.com",
+            {"display_name": "申请人"},
+            sqlite_path=self.database,
+        )
+        with self.assertRaisesRegex(ValidationError, "至少一项"):
+            apply_to_activity(draft_id, "member1@example.com", sqlite_path=self.database)
 
     def test_avatar_validation_accepts_small_image_and_rejects_invalid_data(self) -> None:
         avatar_bytes = b"\x89PNG\r\n\x1a\n" + b"small-image"
@@ -195,6 +254,7 @@ class PlatformServiceTests(unittest.TestCase):
                 "school": "北京大学",
                 "bio": "只给自己看",
                 "contact_email": "member1@example.com",
+                "contact_qq": "123456",
             },
             interests=[("sport", "羽毛球")],
             privacy={
@@ -202,6 +262,7 @@ class PlatformServiceTests(unittest.TestCase):
                 "bio": "private",
                 "interests": "activity_members",
                 "contact_email": "matched",
+                "contact_qq": "activity_members",
             },
             sqlite_path=self.database,
         )
@@ -234,6 +295,7 @@ class PlatformServiceTests(unittest.TestCase):
             [{"category": "sport", "tag": "羽毛球"}], activity_view["interests"]
         )
         self.assertNotIn("contact_email", activity_view)
+        self.assertEqual("123456", activity_view["contact_qq"])
 
         now = int(time.time())
         with transaction(self.database) as connection:

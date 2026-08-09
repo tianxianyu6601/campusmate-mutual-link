@@ -44,6 +44,7 @@ PROFILE_COLUMNS = (
     "self_description",
     "partner_expectation",
     "contact_email",
+    "contact_qq",
     "contact_wechat",
     "available_times_json",
     "preferred_locations_json",
@@ -75,6 +76,7 @@ PROFILE_PRIVACY_FIELDS = {
     "self_description",
     "partner_expectation",
     "contact_email",
+    "contact_qq",
     "contact_wechat",
 }
 PROFILE_FIELD_PRIVACY_KEY = {
@@ -97,6 +99,7 @@ PROFILE_FIELD_PRIVACY_KEY = {
     "self_description": "self_description",
     "partner_expectation": "partner_expectation",
     "contact_email": "contact_email",
+    "contact_qq": "contact_qq",
     "contact_wechat": "contact_wechat",
 }
 MATCHING_REQUIRED_FIELDS = (
@@ -559,6 +562,7 @@ def upsert_profile(
         "self_description": str(profile.get("self_description", "")).strip(),
         "partner_expectation": str(profile.get("partner_expectation", "")).strip(),
         "contact_email": contact_email,
+        "contact_qq": str(profile.get("contact_qq", "")).strip(),
         "contact_wechat": str(profile.get("contact_wechat", "")).strip(),
         "available_times_json": _json(available_times),
         "preferred_locations_json": _json(preferred_locations),
@@ -597,11 +601,14 @@ def upsert_profile(
         "bio": 300,
         "self_description": 1000,
         "partner_expectation": 1000,
+        "contact_qq": 12,
         "contact_wechat": 80,
     }
     for field_name, maximum in length_limits.items():
         if len(str(values[field_name])) > maximum:
             raise ValidationError(f"{field_name} 长度不能超过 {maximum} 个字符")
+    if values["contact_qq"] and not re.fullmatch(r"\d{5,12}", values["contact_qq"]):
+        raise ValidationError("QQ号应为 5 至 12 位数字")
 
     normalized_privacy = dict(privacy or {})
     unknown_privacy_fields = set(normalized_privacy) - PROFILE_PRIVACY_FIELDS
@@ -751,6 +758,22 @@ def validate_profile_for_matching(
     return matching_profile_missing_fields(profile, interests)
 
 
+def _require_activity_contact(
+    connection: DatabaseConnection, email: str
+) -> dict[str, Any]:
+    """Require one saved contact method before publishing or joining an activity."""
+
+    profile = _load_profile(connection, email)
+    if profile is None or not any(
+        str(profile.get(field_name, "")).strip()
+        for field_name in ("contact_email", "contact_qq", "contact_wechat")
+    ):
+        raise ValidationError(
+            "发布或参加活动前，请先在个人资料中填写邮箱、QQ号或微信号中的至少一项"
+        )
+    return profile
+
+
 def create_activity(
     organizer_email: str,
     *,
@@ -787,6 +810,8 @@ def create_activity(
     now = _now()
     with transaction(path, immediate=True) as connection:
         organizer = _require_user(connection, organizer_email)
+        if values["status"] == "published":
+            _require_activity_contact(connection, organizer)
         connection.execute(
             """
             INSERT INTO activities(
@@ -1056,6 +1081,8 @@ def update_activity(
             visibility=visibility,
             status=requested_status,
         )
+        if values["status"] == "published":
+            _require_activity_contact(connection, organizer)
         member_count = int(
             connection.execute(
                 "SELECT COUNT(*) AS count FROM activity_members WHERE activity_id = ?",
@@ -1113,6 +1140,7 @@ def publish_activity(
             raise ConflictError("只有草稿可以发布")
         if int(row["starts_at"]) < now - 60:
             raise ValidationError("请先把活动开始时间调整到未来")
+        _require_activity_contact(connection, organizer)
         connection.execute(
             "UPDATE activities SET status = 'published', version = version + 1, updated_at = ? WHERE activity_id = ?",
             (now, activity_id),
@@ -1173,6 +1201,7 @@ def apply_to_activity(
     now = _now()
     with transaction(path, immediate=True) as connection:
         applicant = _require_user(connection, applicant_email)
+        _require_activity_contact(connection, applicant)
         activity = connection.execute(
             connection.select_for_update("SELECT * FROM activities WHERE activity_id = ?"),
             (activity_id,),

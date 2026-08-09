@@ -157,12 +157,14 @@ class AuthTests(unittest.TestCase):
 
     def test_cookie_writer_uses_secure_browser_attributes(self) -> None:
         with patch("services.auth.st.html") as html:
-            auth.write_session_cookie("opaque-token", redirect_to="/")
+            auth.write_session_cookie("opaque-token")
 
         html_markup = html.call_args.args[0]
         self.assertIn("SameSite=Strict", html_markup)
         self.assertIn("; Secure", html_markup)
         self.assertIn("Max-Age=604800", html_markup)
+        self.assertNotIn("window.location.replace", html_markup)
+        self.assertNotIn("window.parent.location", html_markup)
         self.assertTrue(html.call_args.kwargs["unsafe_allow_javascript"])
 
     def test_require_login_redirects_when_session_is_missing(self) -> None:

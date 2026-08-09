@@ -115,6 +115,7 @@ PRIVACY_LABELS = {
     "self_description": "我是什么样的人",
     "partner_expectation": "我想找什么样的人",
     "contact_email": "联系邮箱",
+    "contact_qq": "QQ号",
     "contact_wechat": "微信号",
 }
 DEFAULT_PRIVACY = {
@@ -130,8 +131,9 @@ DEFAULT_PRIVACY = {
     "preferred_locations": "activity_members",
     "self_description": "matched",
     "partner_expectation": "matched",
-    "contact_email": "matched",
-    "contact_wechat": "matched",
+    "contact_email": "activity_members",
+    "contact_qq": "activity_members",
+    "contact_wechat": "activity_members",
 }
 
 
@@ -176,6 +178,7 @@ profile: dict[str, Any] = {
     "self_description": "",
     "partner_expectation": "",
     "contact_email": email,
+    "contact_qq": "",
     "contact_wechat": "",
     "available_times": [],
     "preferred_locations": [],
@@ -284,11 +287,21 @@ with st.form("profile_editor"):
             max_chars=300,
             placeholder="用一两句话介绍现在的你。",
         )
-        contact_wechat = st.text_input(
-            "微信号（可选）",
-            value=str(profile.get("contact_wechat", "")),
-            max_chars=80,
-        )
+        st.caption("发布或参加活动前，邮箱、QQ号、微信号至少填写一项。")
+        contact_left, contact_right = st.columns(2)
+        with contact_left:
+            contact_qq = st.text_input(
+                "QQ号（可选）",
+                value=str(profile.get("contact_qq", "")),
+                max_chars=12,
+                placeholder="5 至 12 位数字",
+            )
+        with contact_right:
+            contact_wechat = st.text_input(
+                "微信号（可选）",
+                value=str(profile.get("contact_wechat", "")),
+                max_chars=80,
+            )
 
     with interests_tab:
         st.subheader("兴趣标签")
@@ -486,6 +499,7 @@ if submitted:
         "self_description": self_description,
         "partner_expectation": partner_expectation,
         "contact_email": contact_email,
+        "contact_qq": contact_qq,
         "contact_wechat": contact_wechat,
         "available_times": available_times,
         "preferred_locations": preferred_locations,

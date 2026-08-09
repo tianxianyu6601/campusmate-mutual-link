@@ -39,6 +39,7 @@ PROFILE_COLUMNS = (
     "self_description",
     "partner_expectation",
     "contact_email",
+    "contact_qq",
     "contact_wechat",
     "available_times_json",
     "preferred_locations_json",
@@ -119,7 +120,10 @@ def _import(
                 VALUES ({profile_placeholders})
                 ON CONFLICT(email) DO UPDATE SET {profile_updates}
                 """,
-                tuple(row[column] for column in PROFILE_COLUMNS),
+                tuple(
+                    row[column] if column in row.keys() else ""
+                    for column in PROFILE_COLUMNS
+                ),
             )
         for row in rows["profile_interests"]:
             connection.execute(
